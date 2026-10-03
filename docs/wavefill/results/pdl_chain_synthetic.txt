@@ -1,0 +1,48 @@
+### pdl_chain --small 0 --prefetch-kib 32
+# 64 layers x 4 big kernels (17.85 GB), 0 small kernel(s) after each big one (chase=24), ideal at 1.70 TB/s = 10501 us
+mode           token_us       GB/s     vs_ideal  extra_us/big
+plain             10811     1651.1         3.0%          1.21
+pdl               10802     1652.6         2.9%          1.18
+             -> +0.1% vs plain
+pdl+pf            11438     1560.7         8.9%          3.66
+             -> -5.5% vs plain
+pdl-late          10763     1658.5         2.5%          1.03
+             -> +0.4% vs plain
+pdl-late+pf       10644     1677.0         1.4%          0.56
+             -> +1.6% vs plain
+pdl-late+ld4      10809     1651.6         2.9%          1.20
+             -> +0.0% vs plain
+pdl-late+ld8      10650     1676.1         1.4%          0.58
+             -> +1.5% vs plain
+### pdl_chain --small 1 --prefetch-kib 32
+# 64 layers x 4 big kernels (17.85 GB), 1 small kernel(s) after each big one (chase=24), ideal at 1.70 TB/s = 10501 us
+mode           token_us       GB/s     vs_ideal  extra_us/big
+plain             12318     1449.2        17.3%          7.10
+pdl               12215     1461.4        16.3%          6.70
+             -> +0.8% vs plain
+pdl+pf            12702     1405.4        21.0%          8.60
+             -> -3.0% vs plain
+pdl-late          12168     1467.0        15.9%          6.51
+             -> +1.2% vs plain
+pdl-late+pf       12373     1442.7        17.8%          7.31
+             -> -0.4% vs plain
+pdl-late+ld4      12225     1460.2        16.4%          6.74
+             -> +0.8% vs plain
+pdl-late+ld8      12017     1485.4        14.4%          5.92
+             -> +2.5% vs plain
+### pdl_chain --small 2 --prefetch-kib 32
+# 64 layers x 4 big kernels (17.85 GB), 2 small kernel(s) after each big one (chase=24), ideal at 1.70 TB/s = 10501 us
+mode           token_us       GB/s     vs_ideal  extra_us/big
+plain             13467     1325.5        28.3%         11.59
+pdl               13267     1345.5        26.3%         10.81
+             -> +1.5% vs plain
+pdl+pf            13737     1299.5        30.8%         12.64
+             -> -2.0% vs plain
+pdl-late          13258     1346.5        26.3%         10.77
+             -> +1.6% vs plain
+pdl-late+pf       13490     1323.3        28.5%         11.68
+             -> -0.2% vs plain
+pdl-late+ld4      13308     1341.4        26.7%         10.97
+             -> +1.2% vs plain
+pdl-late+ld8      13083     1364.5        24.6%         10.09
+             -> +2.9% vs plain

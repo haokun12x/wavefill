@@ -1,0 +1,23 @@
+Agent turn latency, whole engine (tools/wavefill/agent_turns.cpp): Qwen3.8-27B NVFP4 artifact, BF16 KV,
+1024-token prefill chunks, no speculative decoding, CUDA graphs, RTX 5090 (GPU otherwise idle), 2026-10-03.
+For each (history H, delta d) a fresh conversation prefills H tokens untimed, then runs 1 warm-up and
+3 measured turns; each turn = previous prompt + previous output + d new corpus tokens, 1 output token.
+The engine reuses the previous endpoint (reused_prompt_tokens == history - 1 in every measured turn,
+checked), so only d + 1 tokens are prefilled. before = commit 4b10b1c2 (NVFP4 GEMV only),
+after = Wavefill HEAD; binaries alternated, 2 rounds -> 6 samples each. Median of the 6 samples.
+ttft = first_token_seconds (request admission to first token). History grows by d+1 per turn, so the
+spread of the larger deltas is mostly context growth (identical for before/after).
+
+     H delta ctx_mean prefill_before_ms prefill_after_ms     x ttft_before_ms ttft_after_ms     x
+ 32768   128    33027              60.3             42.5  1.42           61.8          44.1  1.40
+ 32768   256    33283              74.1             62.4  1.19           77.2          65.6  1.18
+ 32768   512    33795             125.2            103.1  1.22          128.6         106.7  1.21
+ 32768  1024    34819             197.6            175.7  1.12          201.1         179.3  1.12
+ 32768  2048    36867             393.0            348.2  1.13          397.2         352.2  1.13
+ 32768  4096    40963             826.5            721.0  1.15          837.1         731.6  1.14
+ 65536   128    65795              93.0             56.3  1.65          102.0          65.3  1.56
+ 65536   256    66051             106.6             83.4  1.28          115.6          92.6  1.25
+ 65536   512    66563             187.4            141.8  1.32          196.6         150.8  1.30
+ 65536  1024    67587             288.7            243.4  1.19          299.0         253.9  1.18
+ 65536  2048    69635             573.0            481.2  1.19          584.8         492.8  1.19
+ 65536  4096    73731            1183.7            988.4  1.20         1197.7        1001.9  1.20

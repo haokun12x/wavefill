@@ -111,7 +111,7 @@ drops from 2745 to 2595 MHz. Inside the engine the attention therefore speeds up
 1.40×, and kernels that did not change at all get 3% slower
 ([`results/power_cap_64k_prefill.txt`](results/power_cap_64k_prefill.txt)). Kernel micro-benchmarks
 run for milliseconds and never reach that steady state. At the same power the prefill finishes
-sooner, so energy per prefill drops by about 11%.
+sooner, so energy per prefill drops by about 9% (588 W × 11.50 s → 600 W × 10.28 s).
 
 ## Verification
 

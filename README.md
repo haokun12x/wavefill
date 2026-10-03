@@ -29,6 +29,7 @@ upstream authors' work; Wavefill's changes are the three commits on top of upstr
 
 Details: [long-context attention](docs/wavefill/long-context-attention.md) ·
 [NVFP4 GEMV](docs/wavefill/nvfp4-down-gemv.md) · [中文概要](docs/wavefill/README.zh-CN.md) ·
+[技术报告（中文）](docs/wavefill/technical-report.zh-CN.md) ·
 [tools](tools/wavefill/README.md) · [raw results](docs/wavefill/results/).
 Built with an AI coding assistant (Claude Code); measurements and design decisions are documented
 in the links above.

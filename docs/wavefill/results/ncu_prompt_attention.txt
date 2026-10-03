@@ -1,0 +1,26 @@
+Nsight Compute 2026.2.1, one launch of the causal prompt attention kernel (1024-token chunk, d256-h24-kv4,
+ninfer_causal_softmax_attention_bench --profile). ncu locks the SM clock (2.52 GHz here), so durations are
+longer than the boost-clock benchmark numbers. Reports are ~550 MB each and are not kept in the repository.
+
+                               INT8, ctx 64k      INT8, 32k          BF16, 32k           BF16, 32k
+                               (upstream kernel)  (split-KV build,   (split-KV build,    (Wavefill: split +
+                                                  S=2)               FP32-acc PV, S=2)   FP16-acc PV, S=2)
+Duration (ms)                  12.28              5.45               5.20                4.50
+Grid / block (threads)         384 / 512          768 / 512          768 / 128           768 / 128
+Registers per thread           120                120                254                 255
+Dynamic shared memory (B)      92,672             92,672             98,304              98,304
+Waves per SM                   2.26               4.52               4.52                4.52
+Achieved occupancy             33.3%              33.3%              8.33%               8.33%
+Eligible warps per scheduler   0.59               0.58               0.12                0.17
+Issue slots busy               26.3%              32.2%              10.7%               15.6%
+Tensor pipe (of its peak)      38.8%              44.3%              73.8%               64.3%
+DRAM throughput (of peak)      0.86%              0.92%              1.78%               2.05%
+L2 hit rate                    -                  98.67%             98.74%              98.73%
+
+Notes
+- DRAM is idle (< 2.1%): the kernel is compute-bound; each 64-key K/V block is fetched once from DRAM and
+  re-read by the 6 (GQA) x 16 (query blocks) = 96 CTAs that need it, so the L2 hit rate is ~1 - 1/96.
+- BF16: one CTA (4 warps) per SM, i.e. one warp per scheduler (eligible warps 0.12-0.17).
+- Tensor pipe 73.8% -> 64.3% with FP16-accumulate PV while the time drops 5.20 -> 4.50 ms: the ceiling
+  moved. At 2.52 GHz QK (FP32 acc) and PV (FP16 acc) need 1.90 + 0.95 = 2.86 ms at peak; 2.86 / 4.50 = 63%.
+- "split-KV build" = the intermediate development build with cluster split-KV only.

@@ -6,6 +6,8 @@ headers with NInfer's nvcc flags (`build.sh`, needs CUDA 13.x and an sm_120 GPU)
 | file | what it does |
 |---|---|
 | `build.sh [target...]` | builds the `.cu` harnesses (`NVCC=` overrides the compiler) |
+| `bw_variants.cu` | pure-read DRAM ceiling: vector loads (grid-stride, per-CTA slices, cache hints) and TMA bulk copies over a 4 GiB buffer |
+| `pdl_chain.cu` | synthetic 64-layer decode chain of weight-streaming kernels: plain launches vs PDL vs L2 bulk prefetch vs register pre-loads |
 | `mma_peak.cu` | dense `mma.sync` throughput per shape and accumulator (BF16/FP16/INT8/E4M3) |
 | `cluster_occupancy.cu` | clusters of S whole-SM CTAs the GPU holds at once, S = 1..16 |
 | `attn_numerics.cu` | the upstream BF16 prompt kernel vs this tree's (S = 1, 2, 4, 8) vs an FP64 oracle on sampled rows, for uniform / peaked / attention-sink / V-outlier inputs |
@@ -14,4 +16,5 @@ headers with NInfer's nvcc flags (`build.sh`, needs CUDA 13.x and an sm_120 GPU)
 | `prompt_bf16_wide.cuh` | rejected prototype with rows/keys per tile as parameters (its 32-key variants index the 64-token page table wrongly above 16k context: timing only) |
 | `prefill_model.py` | whole-prompt prefill time from per-chunk attention times + 88 ms of other work per 1024-token chunk |
 | `sass-diff.py` | which device functions differ between two binaries, compared as SASS hash multisets |
+| `agent_turns.cpp`, `build-agent-turns.sh <build>` | agent-turn latency on the whole engine: long history kept by prefix reuse, then turns that append d tokens; links against an existing build tree's libraries |
 | `long-prefill-ab.sh` | whole-model long-prompt prefill A/B of two `ninfer_bench` binaries (needs ≥ 26 GiB free GPU memory) |

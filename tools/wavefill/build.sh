@@ -11,7 +11,7 @@ NVCC="${NVCC:-nvcc}"
 FLAGS=(-forward-unknown-to-host-compiler -I"$ROOT/include" -I"$ROOT/src" -I"$HERE"
   -O3 -DNDEBUG -std=c++20 "--generate-code=arch=compute_120a,code=[compute_120a,sm_120a]"
   -lineinfo -rdc=true)
-for target in "${@:-mma_peak cluster_occupancy attn_numerics attn_timing}"; do
+for target in "${@:-mma_peak cluster_occupancy attn_numerics attn_timing bw_variants pdl_chain}"; do
   for t in $target; do
     "$NVCC" "${FLAGS[@]}" "$HERE/$t.cu" -o "$HERE/$t"
     echo "built $HERE/$t"
