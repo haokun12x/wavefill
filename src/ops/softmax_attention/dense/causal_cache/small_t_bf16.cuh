@@ -205,7 +205,6 @@ __launch_bounds__(128, 2) __global__ void causal_attention_small_t_tc_partial_bf
                     smem_addr(&qkv_s[arow * D + causal_small_t_tc_swz(arow, acol)]));
     }
     __syncthreads();
-    int physical_page = physical_pages_s[0];
     float acc[PVNt][4];
 #pragma unroll
     for (int n = 0; n < PVNt; ++n) {
@@ -214,53 +213,51 @@ __launch_bounds__(128, 2) __global__ void causal_attention_small_t_tc_partial_bf
     }
     float m0 = -CUDART_INF_F, m1 = -CUDART_INF_F, l0 = 0.0f, l1 = 0.0f;
 
-    for (int kb = 0; kb < key_blocks; ++kb) {
-        const int k0 = first_tile + kb * Bc;
-        if (kb != 0 && (k0 & kPagedKVPageMask) == 0) {
-            physical_page = physical_pages_s[(k0 >> kPagedKVPageShift) - first_page];
-        }
-        // Stage BF16 K and persistent FP16 V with one cp.async wave (16B/thread, high MLP).
-        // Current-step K comes from input and V from the row converted above; tail slots are
-        // zeroed.
+    // Stage BF16 K or persistent FP16 V of one key tile with one cp.async wave (16B/thread).
+    // Current-step K comes from input and V from the row converted above; tail slots are zeroed.
+    // K(kb) and V(kb) are staged separately so that one of them is always in flight: V(kb) loads
+    // under QK(kb) and K(kb + 1) under PV(kb).
+    const auto stage = [&]<bool IsKey>(int kb) {
+        const int k0            = first_tile + kb * Bc;
+        const int physical_page = physical_pages_s[(k0 >> kPagedKVPageShift) - first_page];
 #pragma unroll 1
         for (int chunk = tid; chunk < Bc * (D / 8); chunk += Threads) {
-            const int key_l      = chunk / (D / 8);
-            const int d          = (chunk - key_l * (D / 8)) * 8;
-            const int key        = k0 + key_l;
-            __nv_bfloat16* k_dst = &k_s[key_l * D + causal_small_t_tc_swz(key_l, d)];
-            __half* v_dst        = &v_s[key_l * D + causal_small_t_tc_swz(key_l, d)];
+            const int key_l = chunk / (D / 8);
+            const int d     = (chunk - key_l * (D / 8)) * 8;
+            const int key   = k0 + key_l;
+            void* dst       = IsKey
+                                  ? static_cast<void*>(&k_s[key_l * D + causal_small_t_tc_swz(key_l, d)])
+                                  : static_cast<void*>(&v_s[key_l * D + causal_small_t_tc_swz(key_l, d)]);
             if (key >= split_start && key < split_end) {
-                if constexpr (CacheInput::writes_cache) {
+                const std::int64_t off =
+                    causal_cache_index<Geometry>(physical_page, kv_head, d, key & kPagedKVPageMask);
+                if constexpr (!IsKey) {
+                    ninfer::ops::cp_async<16>(dst, &cache_v[off]);
+                } else if constexpr (CacheInput::writes_cache) {
                     const int new_token = key - first_pos;
-                    const bool from_new =
-                        new_token >= 0 && new_token < valid_tokens && key >= first_pos;
-                    if (from_new) {
-                        const std::int64_t off =
-                            kv_cache_int8_new_index<Geometry>(kv_head, d, new_token);
-                        ninfer::ops::cp_async<16>(k_dst, &input.k[off]);
-                        const std::int64_t cache_off = causal_cache_index<Geometry>(
-                            physical_page, kv_head, d, key & kPagedKVPageMask);
-                        ninfer::ops::cp_async<16>(v_dst, &cache_v[cache_off]);
+                    if (new_token >= 0 && new_token < valid_tokens && key >= first_pos) {
+                        ninfer::ops::cp_async<16>(
+                            dst,
+                            &input.k[kv_cache_int8_new_index<Geometry>(kv_head, d, new_token)]);
                     } else {
-                        const std::int64_t off = causal_cache_index<Geometry>(
-                            physical_page, kv_head, d, key & kPagedKVPageMask);
-                        ninfer::ops::cp_async<16>(k_dst, &cache_k[off]);
-                        ninfer::ops::cp_async<16>(v_dst, &cache_v[off]);
+                        ninfer::ops::cp_async<16>(dst, &cache_k[off]);
                     }
                 } else {
-                    const std::int64_t off = causal_cache_index<Geometry>(physical_page, kv_head, d,
-                                                                          key & kPagedKVPageMask);
-                    ninfer::ops::cp_async<16>(k_dst, &cache_k[off]);
-                    ninfer::ops::cp_async<16>(v_dst, &cache_v[off]);
+                    ninfer::ops::cp_async<16>(dst, &cache_k[off]);
                 }
             } else {
-                store_vec(k_dst, make_int4(0, 0, 0, 0));
-                store_vec(v_dst, make_int4(0, 0, 0, 0));
+                store_vec(dst, make_int4(0, 0, 0, 0));
             }
         }
         ninfer::ops::cp_commit();
-        ninfer::ops::cp_wait<0>();
+    };
+
+    stage.template operator()<true>(0);
+    for (int kb = 0; kb < key_blocks; ++kb) {
+        const int k0 = first_tile + kb * Bc;
+        ninfer::ops::cp_wait<0>(); // K(kb) landed; PV(kb - 1) finished reading v_s below.
         __syncthreads();
+        stage.template operator()<false>(kb);
 
         float score[QKNt][4];
 #pragma unroll
@@ -358,7 +355,9 @@ __launch_bounds__(128, 2) __global__ void causal_attention_small_t_tc_partial_bf
             acc[n][2] *= alpha1;
             acc[n][3] *= alpha1;
         }
-        __syncwarp();
+        ninfer::ops::cp_wait<0>(); // V(kb) landed.
+        __syncthreads();           // Every warp is past QK(kb): k_s is free.
+        if (kb + 1 < key_blocks) { stage.template operator()<true>(kb + 1); }
 
 #pragma unroll
         for (int n = 0; n < PVNt; ++n) {
@@ -378,7 +377,6 @@ __launch_bounds__(128, 2) __global__ void causal_attention_small_t_tc_partial_bf
                         vf[0], vf[1]);
             }
         }
-        __syncthreads();
     }
 
     if (lid == 0) {

@@ -485,7 +485,7 @@ void causal_softmax_attention(const Tensor& q, const Tensor& k, const Tensor& v,
         return;
     }
     detail::causal_attention_prompt_launch(q, k, v, positions, valid_columns, kv_table_rows, scale,
-                                           cache, out, stream);
+                                           cache, envelope, out, stream);
 }
 
 void causal_softmax_attention_cached(const Tensor& q, const Tensor& positions,
@@ -512,7 +512,8 @@ void causal_softmax_attention_cached(const Tensor& q, const Tensor& positions,
             q, positions, scale, cache, envelope, partial.acc, partial.m, partial.l, out, stream);
         return;
     }
-    detail::causal_attention_prompt_attention_launch(q, positions, scale, cache, out, stream);
+    detail::causal_attention_prompt_attention_launch(q, positions, scale, cache, envelope, out,
+                                                     stream);
 }
 
 } // namespace ninfer::ops

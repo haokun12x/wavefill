@@ -7,6 +7,7 @@
 #include "ops/kv_cache/fp8_e4m3_row_codec.cuh"
 #include "ops/kv_cache/hadamard_d256.cuh"
 #include "ops/softmax_attention/dense/causal_cache/prompt_common.cuh"
+#include "ops/softmax_attention/dense/causal_cache/prompt_split.cuh"
 
 #include <cuda_bf16.h>
 #include <cuda_fp16.h>
@@ -37,14 +38,14 @@ inline constexpr int kCausalPromptFp8PBytes =
 inline constexpr int kCausalPromptFp8ScaleBytes =
     2 * kCausalPromptFp8Bc * static_cast<int>(sizeof(__half));
 inline constexpr int kCausalPromptFp8StatsBytes =
-    7 * kCausalPromptFp8Br * static_cast<int>(sizeof(float));
+    8 * kCausalPromptFp8Br * static_cast<int>(sizeof(float));
 inline constexpr int kCausalPromptFp8SmemBytes =
     kCausalPromptFp8QBytes + kCausalPromptFp8QScaleBytes + kCausalPromptFp8KBytes +
     kCausalPromptFp8VBytes + kCausalPromptFp8VStageBytes + kCausalPromptFp8PBytes +
     kCausalPromptFp8ScaleBytes + kCausalPromptFp8StatsBytes;
 
 static_assert(kCausalPromptFp8DConsumers == 4);
-static_assert(kCausalPromptFp8SmemBytes == 92416);
+static_assert(kCausalPromptFp8SmemBytes == 92672);
 
 __device__ __forceinline__ int4 causal_prompt_fp8_dequant_f16x8(const std::uint8_t* codes8,
                                                                 __half scale) {
@@ -79,7 +80,9 @@ __global__ __maxnreg__(120) void causal_attention_prompt_fp8_kernel(
     constexpr int VWorkerWarps  = kCausalPromptFp8Warps - ProducerWarps;
     constexpr int WorkerThreads = VWorkerWarps * 32;
     constexpr float Log2E       = 1.4426950408889634074f;
+    constexpr float kPvShift    = 6.0F; // log2(Bc)
     constexpr unsigned FullMask = 0xffffffffU;
+    static_assert(Bc == 64);
     static_assert(QKKs == 8);
     static_assert(PVNtPerWarp == 8);
 
@@ -100,10 +103,12 @@ __global__ __maxnreg__(120) void causal_attention_prompt_fp8_kernel(
     float* partial_m_s   = running_l_s + Br;
     float* partial_l_s   = partial_m_s + 2 * Br;
     float* alpha_s       = partial_l_s + 2 * Br;
+    float* beta_s        = alpha_s + Br;
     __nv_bfloat16* q_b16 = reinterpret_cast<__nv_bfloat16*>(q_fp8);
     __nv_bfloat16* k_b16 = reinterpret_cast<__nv_bfloat16*>(k_fp8);
 
-    const int q_block = static_cast<int>(blockIdx.x);
+    // A cluster of S CTAs shares one tile and splits its key blocks (prompt_split.cuh).
+    const int q_block = static_cast<int>(blockIdx.x) / causal_prompt_cluster_splits();
     const int q_head  = static_cast<int>(blockIdx.y);
     const int tid     = static_cast<int>(threadIdx.x);
     const int warp    = tid >> 5;
@@ -113,15 +118,18 @@ __global__ __maxnreg__(120) void causal_attention_prompt_fp8_kernel(
     const int tokens  = metadata.valid_tokens(width);
     if (q_head >= Geometry::QHeads || q0 >= width) return;
     if (q0 >= tokens) {
-        causal_prompt_zero_output_rows<Geometry>(out, q_head, q0, min(q0 + Br, width), tid,
-                                                 kCausalPromptFp8Threads);
+        if (causal_prompt_cluster_rank() == 0) {
+            causal_prompt_zero_output_rows<Geometry>(out, q_head, q0, min(q0 + Br, width), tid,
+                                                     kCausalPromptFp8Threads);
+        }
         return;
     }
     const int base_pos              = positions[0];
     const std::int32_t* block_table = metadata.block_table();
     const int tile_rows             = min(Br, tokens - q0);
     const int max_query_abs         = base_pos + q0 + tile_rows - 1;
-    const int key_blocks            = max_query_abs / Bc + 1;
+    const CausalPromptSplit split   = causal_prompt_split(max_query_abs / Bc + 1);
+    if (split.kb_begin >= split.kb_end) return;
 
     for (int row = warp; row < Br; row += kCausalPromptFp8Warps) {
         float values[8];
@@ -218,7 +226,7 @@ __global__ __maxnreg__(120) void causal_attention_prompt_fp8_kernel(
         issue_kv_codes(tile_k0, cooperative_tid, cooperative_threads);
     };
 
-    issue_kv_tile(0, tid, kCausalPromptFp8Threads);
+    issue_kv_tile(split.kb_begin * Bc, tid, kCausalPromptFp8Threads);
     ninfer::ops::cp_wait<0>();
     __syncthreads();
 
@@ -229,7 +237,7 @@ __global__ __maxnreg__(120) void causal_attention_prompt_fp8_kernel(
         for (int i = 0; i < 4; ++i) acc[n][i] = 0.0F;
     }
     const float scale_l2 = scale * Log2E;
-    for (int kb = 0; kb < key_blocks; ++kb) {
+    for (int kb = split.kb_begin; kb < split.kb_end; ++kb) {
         const int k0 = kb * Bc;
         if (warp < ProducerWarps) {
             const int row_base = (warp >> 1) * 16;
@@ -314,23 +322,32 @@ __global__ __maxnreg__(120) void causal_attention_prompt_fp8_kernel(
             const float alpha1      = previous_m1 == -CUDART_INF_F
                                           ? 0.0F
                                           : exp2_approx(__fmaf_rn(previous_m1, scale_l2, -nm1_scaled));
-            float bl0               = 0.0F;
-            float bl1               = 0.0F;
+            // PV accumulates in FP16 per tile, so P is taken relative to the tile's own row max and
+            // scaled by 2^-kPvShift: each tile partial is a sub-convex combination of V rows (no
+            // overflow) at full FP16 precision; beta folds the tile back to the running max.
+            const float beta0 =
+                bm0 == -CUDART_INF_F ? 0.0F : exp2_approx(__fmaf_rn(bm0, scale_l2, -nm0_scaled));
+            const float beta1 =
+                bm1 == -CUDART_INF_F ? 0.0F : exp2_approx(__fmaf_rn(bm1, scale_l2, -nm1_scaled));
+            const float nm0_p = (bm0 == -CUDART_INF_F ? 0.0F : bm0 * scale_l2) + kPvShift;
+            const float nm1_p = (bm1 == -CUDART_INF_F ? 0.0F : bm1 * scale_l2) + kPvShift;
+            float bl0         = 0.0F;
+            float bl1         = 0.0F;
 #pragma unroll
             for (int nt = 0; nt < QKNt; ++nt) {
                 const int col0  = col_base + nt * 8 + 2 * lid;
                 const int col1  = col0 + 1;
                 const float p00 = score[nt][0] > -CUDART_INF_F
-                                      ? exp2_approx(__fmaf_rn(score[nt][0], scale_l2, -nm0_scaled))
+                                      ? exp2_approx(__fmaf_rn(score[nt][0], scale_l2, -nm0_p))
                                       : 0.0F;
                 const float p01 = score[nt][1] > -CUDART_INF_F
-                                      ? exp2_approx(__fmaf_rn(score[nt][1], scale_l2, -nm0_scaled))
+                                      ? exp2_approx(__fmaf_rn(score[nt][1], scale_l2, -nm0_p))
                                       : 0.0F;
                 const float p10 = score[nt][2] > -CUDART_INF_F
-                                      ? exp2_approx(__fmaf_rn(score[nt][2], scale_l2, -nm1_scaled))
+                                      ? exp2_approx(__fmaf_rn(score[nt][2], scale_l2, -nm1_p))
                                       : 0.0F;
                 const float p11 = score[nt][3] > -CUDART_INF_F
-                                      ? exp2_approx(__fmaf_rn(score[nt][3], scale_l2, -nm1_scaled))
+                                      ? exp2_approx(__fmaf_rn(score[nt][3], scale_l2, -nm1_p))
                                       : 0.0F;
                 bl0 += p00 + p01;
                 bl1 += p10 + p11;
@@ -349,12 +366,14 @@ __global__ __maxnreg__(120) void causal_attention_prompt_fp8_kernel(
             if (col_half == 0 && lid == 0) {
                 const float tile_l0 = partial_l_s[row0] + partial_l_s[Br + row0];
                 const float tile_l1 = partial_l_s[row1] + partial_l_s[Br + row1];
-                running_l_s[row0]   = __fmaf_rn(running_l_s[row0], alpha0, tile_l0);
-                running_l_s[row1]   = __fmaf_rn(running_l_s[row1], alpha1, tile_l1);
+                running_l_s[row0]   = __fmaf_rn(running_l_s[row0], alpha0, beta0 * tile_l0);
+                running_l_s[row1]   = __fmaf_rn(running_l_s[row1], alpha1, beta1 * tile_l1);
                 running_m_s[row0]   = nm0;
                 running_m_s[row1]   = nm1;
                 alpha_s[row0]       = alpha0;
                 alpha_s[row1]       = alpha1;
+                beta_s[row0]        = beta0;
+                beta_s[row1]        = beta1;
             }
         } else if (warp < ProducerWarps + VWorkerWarps) {
             const int worker_tid = tid - ProducerWarps * 32;
@@ -375,7 +394,7 @@ __global__ __maxnreg__(120) void causal_attention_prompt_fp8_kernel(
         }
         __syncthreads();
 
-        const bool has_next = kb + 1 < key_blocks;
+        const bool has_next = kb + 1 < split.kb_end;
         if (has_next) issue_kv_tile((kb + 1) * Bc, tid, kCausalPromptFp8Threads);
 
         const int row_tile = warp % kCausalPromptFp8RowTiles;
@@ -383,31 +402,45 @@ __global__ __maxnreg__(120) void causal_attention_prompt_fp8_kernel(
         const int row_base = row_tile * 16;
         const float alpha0 = alpha_s[row_base + gid];
         const float alpha1 = alpha_s[row_base + gid + 8];
-#pragma unroll
-        for (int n = 0; n < PVNtPerWarp; ++n) {
-            acc[n][0] *= alpha0;
-            acc[n][1] *= alpha0;
-            acc[n][2] *= alpha1;
-            acc[n][3] *= alpha1;
-        }
+        const float beta0  = beta_s[row_base + gid];
+        const float beta1  = beta_s[row_base + gid + 8];
 
+        // Each half of this warp's output n-tiles accumulates the tile's keys in FP16 (twice the
+        // FP32-accumulate MMA rate), then folds into the FP32 accumulator with the rescale.
+        constexpr int PVHalfNt = PVNtPerWarp / 2;
 #pragma unroll
-        for (int k = 0; k < PVKs; ++k) {
-            unsigned pf[4];
-            const int pcol = k * 16 + a_coloff;
-            ldmatrix_x4(pf[0], pf[1], pf[2], pf[3],
-                        smem_addr(&p_s[(row_base + a_rowoff) * Bc +
-                                       causal_prompt_p_swz<Bc>(row_base + a_rowoff, pcol)]));
+        for (int half = 0; half < 2; ++half) {
+            unsigned part[PVHalfNt][2];
 #pragma unroll
-            for (int n = 0; n < PVNtPerWarp; ++n) {
-                const int global_n = d_slice * PVNtPerWarp + n;
-                unsigned vf[2];
-                const int vrow = k * 16 + b_koff + b_rin;
-                const int vcol = global_n * 8;
-                ldmatrix_x2_t(vf[0], vf[1],
-                              smem_addr(&v_f16[vrow * D + causal_prompt_swz(vrow, vcol)]));
-                mma_f16(acc[n][0], acc[n][1], acc[n][2], acc[n][3], pf[0], pf[1], pf[2], pf[3],
-                        vf[0], vf[1]);
+            for (int nn = 0; nn < PVHalfNt; ++nn) { part[nn][0] = part[nn][1] = 0u; }
+#pragma unroll
+            for (int k = 0; k < PVKs; ++k) {
+                unsigned pf[4];
+                const int pcol = k * 16 + a_coloff;
+                ldmatrix_x4(pf[0], pf[1], pf[2], pf[3],
+                            smem_addr(&p_s[(row_base + a_rowoff) * Bc +
+                                           causal_prompt_p_swz<Bc>(row_base + a_rowoff, pcol)]));
+#pragma unroll
+                for (int nn = 0; nn < PVHalfNt; ++nn) {
+                    const int global_n = d_slice * PVNtPerWarp + half * PVHalfNt + nn;
+                    unsigned vf[2];
+                    const int vrow = k * 16 + b_koff + b_rin;
+                    const int vcol = global_n * 8;
+                    ldmatrix_x2_t(vf[0], vf[1],
+                                  smem_addr(&v_f16[vrow * D + causal_prompt_swz(vrow, vcol)]));
+                    mma_f16_f16acc(part[nn][0], part[nn][1], pf[0], pf[1], pf[2], pf[3], vf[0],
+                                   vf[1]);
+                }
+            }
+#pragma unroll
+            for (int nn = 0; nn < PVHalfNt; ++nn) {
+                const int n      = half * PVHalfNt + nn;
+                const float2 top = __half22float2(*reinterpret_cast<const __half2*>(&part[nn][0]));
+                const float2 bot = __half22float2(*reinterpret_cast<const __half2*>(&part[nn][1]));
+                acc[n][0]        = __fmaf_rn(acc[n][0], alpha0, beta0 * top.x);
+                acc[n][1]        = __fmaf_rn(acc[n][1], alpha0, beta0 * top.y);
+                acc[n][2]        = __fmaf_rn(acc[n][2], alpha1, beta1 * bot.x);
+                acc[n][3]        = __fmaf_rn(acc[n][3], alpha1, beta1 * bot.y);
             }
         }
         if (has_next) ninfer::ops::cp_wait<0>();
@@ -419,6 +452,37 @@ __global__ __maxnreg__(120) void causal_attention_prompt_fp8_kernel(
     const int row_base = row_tile * 16;
     const int row0     = row_base + gid;
     const int row1     = row0 + 8;
+
+    if (split.splits > 1) {
+        auto cluster        = cooperative_groups::this_cluster();
+        unsigned char* smem = smem_raw;
+        // The merge arena overlays the running statistics: read them first.
+        const float m_row = tid < Br ? running_m_s[tid] : 0.0F;
+        const float l_row = tid < Br ? running_l_s[tid] : 0.0F;
+        __syncthreads();
+        if (tid < Br) causal_prompt_split_stats(smem)[tid] = make_float2(m_row, l_row);
+        cluster.sync();
+        const float f0 =
+            causal_prompt_split_row_factor(smem, row0, scale_l2, split.splits, split.rank);
+        const float f1 =
+            causal_prompt_split_row_factor(smem, row1, scale_l2, split.splits, split.rank);
+#pragma unroll
+        for (int n = 0; n < PVNtPerWarp; ++n) {
+            const int d0 = (d_slice * PVNtPerWarp + n) * 8 + 2 * lid;
+            causal_prompt_split_store_acc(smem, row0, d0, acc[n][0] * f0, acc[n][1] * f0);
+            causal_prompt_split_store_acc(smem, row1, d0, acc[n][2] * f1, acc[n][3] * f1);
+        }
+        cluster.sync();
+        causal_prompt_split_reduce_store<Geometry>(smem, split.splits, split.rank, out, q_head, q0,
+                                                   tile_rows, tid, kCausalPromptFp8Threads);
+        if (split.rank == 0) {
+            causal_prompt_zero_output_rows<Geometry>(out, q_head, tokens, min(q0 + Br, width), tid,
+                                                     kCausalPromptFp8Threads);
+        }
+        cluster.sync();
+        return;
+    }
+
     const float inv_l0 = running_l_s[row0] > 0.0F ? __frcp_rn(running_l_s[row0]) : 0.0F;
     const float inv_l1 = running_l_s[row1] > 0.0F ? __frcp_rn(running_l_s[row1]) : 0.0F;
 #pragma unroll

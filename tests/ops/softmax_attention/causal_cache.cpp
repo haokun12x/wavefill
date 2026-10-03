@@ -2269,6 +2269,19 @@ int run_geometry(const Geometry& geometry) {
             failures += run_a3_case(geometry, storage, test_case, MappingPattern::Identity);
         }
 
+        // Prompt tiles long enough to be split across a cluster: history not aligned to a key
+        // block, a ragged last query block, and chunk widths that pick different split counts.
+        const AttentionCase split_cases[] = {
+            {17, 4990, 5007, 206u},
+            {40, 3001, 3041, 207u},
+            {130, 1500, 1630, 208u},
+            {40, 3001, 3041, 209u, false, true},
+        };
+        for (const AttentionCase& test_case : split_cases) {
+            failures += run_a1_case(geometry, storage, test_case, MappingPattern::Fragmented);
+            failures += run_a3_case(geometry, storage, test_case, MappingPattern::Identity);
+        }
+
         if (geometry.q_heads == 16) {
             // Loose execution envelopes straddle the two registered host-resource frontiers.
             // Device positions, not these bounds, continue to define the oracle result.

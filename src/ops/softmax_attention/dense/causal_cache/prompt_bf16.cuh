@@ -20,6 +20,7 @@
 #include <math_constants.h>
 
 #include "ops/softmax_attention/dense/causal_cache/prompt_common.cuh"
+#include "ops/softmax_attention/dense/causal_cache/prompt_split.cuh"
 
 #include <cuda_fp16.h>
 
@@ -85,16 +86,19 @@ __launch_bounds__(kCausalPromptThreads, 1) __global__
     constexpr int PVNt          = D / 8;                // 32 PV output n-tiles
     constexpr int PVKs          = Bc / 16;              // 4  PV contraction steps over keys
     constexpr float Log2E       = 1.4426950408889634074f;
+    constexpr float kPvShift    = 6.0f; // log2(Bc)
     constexpr unsigned FullMask = 0xffffffffu;
 
     static_assert(Threads == 128);
+    static_assert(Bc == 64);
 
     extern __shared__ __align__(16) __nv_bfloat16 causal_smem[];
     __nv_bfloat16* q_s = causal_smem;                             // [Br, D] swizzled
     __nv_bfloat16* k_s = q_s + Br * D;                            // [Bc, D] swizzled
     __half* v_s        = reinterpret_cast<__half*>(k_s + Bc * D); // [Bc, D] swizzled
 
-    const int q_block = static_cast<int>(blockIdx.x);
+    // A cluster of S CTAs shares one tile and splits its key blocks (prompt_split.cuh).
+    const int q_block = static_cast<int>(blockIdx.x) / causal_prompt_cluster_splits();
     const int q_head  = static_cast<int>(blockIdx.y);
     const int tid     = static_cast<int>(threadIdx.x);
     const int warp    = tid >> 5;
@@ -105,12 +109,19 @@ __launch_bounds__(kCausalPromptThreads, 1) __global__
 
     if (q_head >= Geometry::QHeads || q0 >= width) { return; }
     if (q0 >= tokens) {
-        causal_prompt_zero_output_rows<Geometry>(out, q_head, q0, min(q0 + Br, width), tid,
-                                                 Threads);
+        if (causal_prompt_cluster_rank() == 0) {
+            causal_prompt_zero_output_rows<Geometry>(out, q_head, q0, min(q0 + Br, width), tid,
+                                                     Threads);
+        }
         return;
     }
     const int base_pos              = positions[0];
     const std::int32_t* block_table = metadata.block_table();
+
+    const int tile_rows           = min(Br, tokens - q0);
+    const int max_query_abs       = base_pos + q0 + tile_rows - 1;
+    const CausalPromptSplit split = causal_prompt_split((max_query_abs / Bc) + 1);
+    if (split.kb_begin >= split.kb_end) { return; }
 
     const int gid = lane >> 2;
     const int lid = lane & 3;
@@ -181,23 +192,21 @@ __launch_bounds__(kCausalPromptThreads, 1) __global__
     }
     float m0 = -CUDART_INF_F, m1 = -CUDART_INF_F, l0 = 0.0f, l1 = 0.0f;
 
-    const int tile_rows     = min(Br, tokens - q0);
-    const int max_query_abs = base_pos + q0 + tile_rows - 1;
-    const int n_block_max   = (max_query_abs / Bc) + 1; // n_block_min == 0
-
     // Fold softmax_scale into the exp2 (FA-style): scores stay raw, so the
     // per-element "* scale" multiply drops out of the QK epilogue entirely.
     const float scale_l2 = scale * Log2E;
-    int physical_page    = block_table[0];
+    int physical_page    = block_table[split.kb_begin];
 
-    // Prologue: commit Q, then kick off K(0). The loop's wait<0> below drains both.
+    // Prologue: commit Q, then kick off the first K tile. The loop's wait<0> below drains both.
     ninfer::ops::cp_commit();
-    causal_prompt_stage_kv<Geometry>(k_s, cache_k, kv_head, 0, max_query_abs, physical_page, tid);
+    causal_prompt_stage_kv<Geometry>(k_s, cache_k, kv_head, split.kb_begin * Bc, max_query_abs,
+                                     physical_page, tid);
     ninfer::ops::cp_commit();
 
-    for (int kb = 0; kb < n_block_max; ++kb) {
+    for (int kb = split.kb_begin; kb < split.kb_end; ++kb) {
         const int k0                 = kb * Bc;
-        const int next_physical_page = (kb + 1 < n_block_max) ? block_table[kb + 1] : physical_page;
+        const int next_physical_page =
+            (kb + 1 < split.kb_end) ? block_table[kb + 1] : physical_page;
 
         ninfer::ops::cp_wait<0>(); // K(kb) landed (also publishes q_s / prev PV done)
         __syncthreads();
@@ -290,6 +299,14 @@ __launch_bounds__(kCausalPromptThreads, 1) __global__
         const float nm1_scaled = nm1 * scale_l2;
         const float alpha0     = exp2_approx(__fmaf_rn(m0, scale_l2, -nm0_scaled));
         const float alpha1     = exp2_approx(__fmaf_rn(m1, scale_l2, -nm1_scaled));
+        // PV accumulates in FP16 per tile, so P is taken relative to the tile's own row max and
+        // scaled by 2^-kPvShift: each tile partial is then a sub-convex combination of V rows (no
+        // overflow), and a tile far below the running max keeps full FP16 precision. beta folds
+        // the tile back to the running max.
+        const float beta0 = exp2_approx(__fmaf_rn(bm0, scale_l2, -nm0_scaled));
+        const float beta1 = exp2_approx(__fmaf_rn(bm1, scale_l2, -nm1_scaled));
+        const float nm0_p = (bm0 == -CUDART_INF_F ? 0.0f : bm0 * scale_l2) + kPvShift;
+        const float nm1_p = (bm1 == -CUDART_INF_F ? 0.0f : bm1 * scale_l2) + kPvShift;
 
         // P = exp2(S - m), repacked into the PV A-fragment layout, plus local block row-sum.
         // The row-sum allreduce is deferred to the epilogue; only row max must be reduced per tile.
@@ -298,10 +315,10 @@ __launch_bounds__(kCausalPromptThreads, 1) __global__
         if (full_score_tile) {
 #pragma unroll
             for (int nt = 0; nt < QKNt; ++nt) {
-                const float p00 = exp2_approx(__fmaf_rn(score[nt][0], scale_l2, -nm0_scaled));
-                const float p01 = exp2_approx(__fmaf_rn(score[nt][1], scale_l2, -nm0_scaled));
-                const float p10 = exp2_approx(__fmaf_rn(score[nt][2], scale_l2, -nm1_scaled));
-                const float p11 = exp2_approx(__fmaf_rn(score[nt][3], scale_l2, -nm1_scaled));
+                const float p00 = exp2_approx(__fmaf_rn(score[nt][0], scale_l2, -nm0_p));
+                const float p01 = exp2_approx(__fmaf_rn(score[nt][1], scale_l2, -nm0_p));
+                const float p10 = exp2_approx(__fmaf_rn(score[nt][2], scale_l2, -nm1_p));
+                const float p11 = exp2_approx(__fmaf_rn(score[nt][3], scale_l2, -nm1_p));
                 bl0 += p00 + p01;
                 bl1 += p10 + p11;
                 const int pk = nt >> 1;
@@ -317,16 +334,16 @@ __launch_bounds__(kCausalPromptThreads, 1) __global__
 #pragma unroll
             for (int nt = 0; nt < QKNt; ++nt) {
                 const float p00 = (score[nt][0] > -CUDART_INF_F)
-                                      ? exp2_approx(__fmaf_rn(score[nt][0], scale_l2, -nm0_scaled))
+                                      ? exp2_approx(__fmaf_rn(score[nt][0], scale_l2, -nm0_p))
                                       : 0.0f;
                 const float p01 = (score[nt][1] > -CUDART_INF_F)
-                                      ? exp2_approx(__fmaf_rn(score[nt][1], scale_l2, -nm0_scaled))
+                                      ? exp2_approx(__fmaf_rn(score[nt][1], scale_l2, -nm0_p))
                                       : 0.0f;
                 const float p10 = (score[nt][2] > -CUDART_INF_F)
-                                      ? exp2_approx(__fmaf_rn(score[nt][2], scale_l2, -nm1_scaled))
+                                      ? exp2_approx(__fmaf_rn(score[nt][2], scale_l2, -nm1_p))
                                       : 0.0f;
                 const float p11 = (score[nt][3] > -CUDART_INF_F)
-                                      ? exp2_approx(__fmaf_rn(score[nt][3], scale_l2, -nm1_scaled))
+                                      ? exp2_approx(__fmaf_rn(score[nt][3], scale_l2, -nm1_p))
                                       : 0.0f;
                 bl0 += p00 + p01;
                 bl1 += p10 + p11;
@@ -341,34 +358,26 @@ __launch_bounds__(kCausalPromptThreads, 1) __global__
             }
         }
 
-        l0 = __fmaf_rn(l0, alpha0, bl0);
-        l1 = __fmaf_rn(l1, alpha1, bl1);
+        l0 = __fmaf_rn(l0, alpha0, beta0 * bl0);
+        l1 = __fmaf_rn(l1, alpha1, beta1 * bl1);
         m0 = nm0;
         m1 = nm1;
-#pragma unroll
-        for (int n = 0; n < PVNt; ++n) {
-            acc[n][0] *= alpha0;
-            acc[n][1] *= alpha0;
-            acc[n][2] *= alpha1;
-            acc[n][3] *= alpha1;
-        }
 
         ninfer::ops::cp_wait<0>(); // V(kb) landed; QK done reading k_s.
         __syncthreads();
 
         // Prefetch K(kb+1) into the (now-free) K buffer, overlapping the PV MMA.
-        if (kb + 1 < n_block_max) {
+        if (kb + 1 < split.kb_end) {
             physical_page = next_physical_page;
             causal_prompt_stage_kv<Geometry>(k_s, cache_k, kv_head, (kb + 1) * Bc, max_query_abs,
                                              physical_page, tid);
             ninfer::ops::cp_commit();
         }
 
-        // O += P V, contracting over the Bc keys. The (k, n) iteration space is
-        // flattened and software-pipelined: the transposed ldmatrix for the next
-        // V fragment is issued while the current MMA runs.
-        // Each x4.trans load covers 2 output n-tiles (16 dims); pipeline the next
-        // load against the current pair of MMAs.
+        // O = alpha * O + P V. Each pair of output n-tiles accumulates its four 16-key steps in
+        // FP16 (twice the FP32-accumulate MMA rate), then folds into the FP32 accumulator with
+        // the rescale. Each x4.trans load covers the pair for one key step; the next load is
+        // issued while the current MMAs run.
         constexpr int PVHalf  = PVNt / 2;      // 16 n-tile pairs
         constexpr int PVLoads = PVKs * PVHalf; // 64 x4.trans loads
         // Swizzled V x4.trans addresses via precomputed per-lane base + immediates.
@@ -377,29 +386,76 @@ __launch_bounds__(kCausalPromptThreads, 1) __global__
             ldmatrix_x4_t(vf[0][0], vf[0][1], vf[0][2], vf[0][3],
                           causal_prompt_swz_addr(v_lane_base, 0u, v_as, v_r));
         }
+        unsigned part[2][2];
 #pragma unroll
         for (int li = 0; li < PVLoads; ++li) {
-            const int k   = li / PVHalf;
-            const int n2  = (li % PVHalf) * 2;
+            const int k   = li % PVKs;
+            const int n2  = (li / PVKs) * 2;
             const int cur = li & 1;
             const int nxt = cur ^ 1;
             if (li + 1 < PVLoads) {
-                const int k2       = (li + 1) / PVHalf;
-                const int n2b      = ((li + 1) % PVHalf) * 2;
+                const int k2       = (li + 1) % PVKs;
+                const int n2b      = ((li + 1) / PVKs) * 2;
                 const unsigned ckv = static_cast<unsigned>(n2b << 4);
                 ldmatrix_x4_t(vf[nxt][0], vf[nxt][1], vf[nxt][2], vf[nxt][3],
                               causal_prompt_swz_addr(v_lane_base + static_cast<unsigned>(k2 * 8192),
                                                      ckv, v_as, v_r));
             }
-            mma_f16(acc[n2][0], acc[n2][1], acc[n2][2], acc[n2][3], p_frag[k][0], p_frag[k][1],
-                    p_frag[k][2], p_frag[k][3], vf[cur][0], vf[cur][1]);
-            mma_f16(acc[n2 + 1][0], acc[n2 + 1][1], acc[n2 + 1][2], acc[n2 + 1][3], p_frag[k][0],
-                    p_frag[k][1], p_frag[k][2], p_frag[k][3], vf[cur][2], vf[cur][3]);
+            if (k == 0) { part[0][0] = part[0][1] = part[1][0] = part[1][1] = 0u; }
+            mma_f16_f16acc(part[0][0], part[0][1], p_frag[k][0], p_frag[k][1], p_frag[k][2],
+                           p_frag[k][3], vf[cur][0], vf[cur][1]);
+            mma_f16_f16acc(part[1][0], part[1][1], p_frag[k][0], p_frag[k][1], p_frag[k][2],
+                           p_frag[k][3], vf[cur][2], vf[cur][3]);
+            if (k == PVKs - 1) {
+#pragma unroll
+                for (int j = 0; j < 2; ++j) {
+                    const float2 top =
+                        __half22float2(*reinterpret_cast<const __half2*>(&part[j][0]));
+                    const float2 bot =
+                        __half22float2(*reinterpret_cast<const __half2*>(&part[j][1]));
+                    acc[n2 + j][0] = __fmaf_rn(acc[n2 + j][0], alpha0, beta0 * top.x);
+                    acc[n2 + j][1] = __fmaf_rn(acc[n2 + j][1], alpha0, beta0 * top.y);
+                    acc[n2 + j][2] = __fmaf_rn(acc[n2 + j][2], alpha1, beta1 * bot.x);
+                    acc[n2 + j][3] = __fmaf_rn(acc[n2 + j][3], alpha1, beta1 * bot.y);
+                }
+            }
         }
     }
 
     l0 = warp_sum<4>(l0, FullMask);
     l1 = warp_sum<4>(l1, FullMask);
+
+    if (split.splits > 1) {
+        auto cluster        = cooperative_groups::this_cluster();
+        unsigned char* smem = reinterpret_cast<unsigned char*>(causal_smem);
+        const int row0      = warp_row0 + gid;
+        const int row1      = row0 + 8;
+        __syncthreads();
+        if (lid == 0) {
+            causal_prompt_split_stats(smem)[row0] = make_float2(m0, l0);
+            causal_prompt_split_stats(smem)[row1] = make_float2(m1, l1);
+        }
+        cluster.sync();
+        const float f0 =
+            causal_prompt_split_row_factor(smem, row0, scale_l2, split.splits, split.rank);
+        const float f1 =
+            causal_prompt_split_row_factor(smem, row1, scale_l2, split.splits, split.rank);
+#pragma unroll
+        for (int n = 0; n < PVNt; ++n) {
+            const int d0 = n * 8 + 2 * lid;
+            causal_prompt_split_store_acc(smem, row0, d0, acc[n][0] * f0, acc[n][1] * f0);
+            causal_prompt_split_store_acc(smem, row1, d0, acc[n][2] * f1, acc[n][3] * f1);
+        }
+        cluster.sync();
+        causal_prompt_split_reduce_store<Geometry>(smem, split.splits, split.rank, out, q_head, q0,
+                                                   tile_rows, tid, Threads);
+        if (split.rank == 0) {
+            causal_prompt_zero_output_rows<Geometry>(out, q_head, tokens, min(q0 + Br, width), tid,
+                                                     Threads);
+        }
+        cluster.sync();
+        return;
+    }
 
     // Normalize once per row via reciprocal-multiply instead of 128 IEEE divides.
     const float inv_l0 = (l0 > 0.0f) ? __frcp_rn(l0) : 0.0f;
