@@ -44,8 +44,12 @@ enum class Nvfp4SimtBlockOrder : std::uint8_t {
     TokenTilesContiguous,
 };
 
+// PhaseUnroll is the unroll factor of the K-phase loop; 0 unrolls every phase. A fully unrolled
+// long K is a large code image (K=17408 is ~100 KB) that the SMs fetch cold on every launch in a
+// decode step, so long shapes pick a small factor.
 template <int WarpsPerCta, int RowsPerWarp, int ValuesPerLane, int AccumulatorChains,
-          Nvfp4ScaleAccess ScaleAccess, Nvfp4CodeCache CodeCache, int MinBlocksPerSm>
+          Nvfp4ScaleAccess ScaleAccess, Nvfp4CodeCache CodeCache, int MinBlocksPerSm,
+          int PhaseUnroll = 0>
 struct Nvfp4GemvSchedule {
     static_assert(WarpsPerCta > 0 && WarpsPerCta <= 32);
     static_assert(RowsPerWarp > 0 && RowsPerWarp <= 8);
@@ -53,6 +57,7 @@ struct Nvfp4GemvSchedule {
     static_assert(AccumulatorChains > 0 && (AccumulatorChains & (AccumulatorChains - 1)) == 0);
     static_assert(AccumulatorChains <= ValuesPerLane / 2);
     static_assert(MinBlocksPerSm > 0);
+    static_assert(PhaseUnroll >= 0);
 
     static constexpr int kWarpsPerCta       = WarpsPerCta;
     static constexpr int kRowsPerWarp       = RowsPerWarp;
@@ -61,6 +66,7 @@ struct Nvfp4GemvSchedule {
     static constexpr auto kScaleAccess      = ScaleAccess;
     static constexpr auto kCodeCache        = CodeCache;
     static constexpr int kMinBlocksPerSm    = MinBlocksPerSm;
+    static constexpr int kPhaseUnroll       = PhaseUnroll;
     static constexpr int kThreads           = WarpsPerCta * 32;
     static constexpr int kRowsPerCta        = WarpsPerCta * RowsPerWarp;
     static constexpr int kPairsPerLane      = ValuesPerLane / 2;

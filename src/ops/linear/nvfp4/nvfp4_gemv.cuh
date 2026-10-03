@@ -158,9 +158,10 @@ compute_nvfp4_rows(const __nv_bfloat16* __restrict__ x, const std::uint8_t* __re
     constexpr int kGroupsPerLane =
         Schedule::kValuesPerLane < 16 ? 1 : Schedule::kValuesPerLane / 16;
     static_assert((Geometry::kInputRows % kValuesPerPhase) == 0);
+    constexpr int kUnroll        = Schedule::kPhaseUnroll > 0 ? Schedule::kPhaseUnroll : kPhases;
     const auto* activation_pairs = reinterpret_cast<const std::uint32_t*>(x);
 
-#pragma unroll
+#pragma unroll kUnroll
     for (int phase = 0; phase < kPhases; ++phase) {
         float coefficients[Schedule::kRowsPerWarp][kGroupsPerLane];
         Nvfp4CodePack<Schedule::kValuesPerLane> row_codes[Schedule::kRowsPerWarp];

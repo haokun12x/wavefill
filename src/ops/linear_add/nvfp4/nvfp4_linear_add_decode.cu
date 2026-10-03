@@ -6,13 +6,22 @@
 #include "ops/linear/nvfp4/nvfp4_gemv.cuh"
 #include "ops/linear_add/nvfp4/nvfp4_linear_add_epilogue.cuh"
 
+#include <type_traits>
+
 namespace ninfer::ops::detail {
 namespace {
 
+// K=17408 is 34 K-phases. Fully unrolled that is a ~100 KB code image which every launch of a
+// decode step fetches cold, so the long shape rolls the loop by 4 and reads its scales per lane.
+template <class Geometry>
+using DecodeSchedule = std::conditional_t<
+    Geometry::kInputRows == 17408,
+    Nvfp4GemvSchedule<8, 2, 16, 4, Nvfp4ScaleAccess::Direct, Nvfp4CodeCache::Default, 2, 4>,
+    Nvfp4GemvSchedule<8, 2, 16, 4, Nvfp4ScaleAccess::StagedRaw, Nvfp4CodeCache::Default, 2>>;
+
 template <class Geometry>
 void launch(const Tensor& x, const Weight& weight, Tensor& residual, cudaStream_t stream) {
-    using Schedule =
-        Nvfp4GemvSchedule<8, 2, 16, 4, Nvfp4ScaleAccess::StagedRaw, Nvfp4CodeCache::Default, 2>;
+    using Schedule        = DecodeSchedule<Geometry>;
     constexpr int kBlocks = Geometry::kOutputRows / Schedule::kRowsPerCta;
     const float inverse   = 1.0F / weight.weight_scale_divisor;
     auto* output          = static_cast<__nv_bfloat16*>(residual.data);

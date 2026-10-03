@@ -4,8 +4,9 @@
 namespace ninfer::ops::detail {
 namespace {
 using Geometry = Nvfp4Geometry<5120, 17408>;
+// 34 K-phases: rolled by 4 with per-lane scale loads instead of one ~100 KB fully unrolled image.
 using Gemv =
-    Nvfp4GemvSchedule<8, 2, 16, 4, Nvfp4ScaleAccess::StagedRaw, Nvfp4CodeCache::Default, 2>;
+    Nvfp4GemvSchedule<8, 2, 16, 4, Nvfp4ScaleAccess::Direct, Nvfp4CodeCache::Default, 2, 4>;
 template <int Tokens>
 using Exact     = Nvfp4SimtSchedule<(Tokens >= 8 && Tokens <= 16) ? 16 : 4, 1, 2, 16, Tokens, 1,
                                 Nvfp4SimtActivationAccess::TokenPacked, Nvfp4ScaleAccess::Direct,
