@@ -1,0 +1,16 @@
+S= 1 clusters=170 CTAs=170 idle_SMs=  0 
+S= 2 clusters= 85 CTAs=170 idle_SMs=  0 
+S= 3 clusters= 52 CTAs=156 idle_SMs= 14 
+S= 4 clusters= 41 CTAs=164 idle_SMs=  6 
+S= 5 clusters= 30 CTAs=150 idle_SMs= 20 
+S= 6 clusters= 22 CTAs=132 idle_SMs= 38 
+S= 7 clusters= 22 CTAs=154 idle_SMs= 16 
+S= 8 clusters= 19 CTAs=152 idle_SMs= 18 
+S= 9 clusters= 11 CTAs= 99 idle_SMs= 71 
+S=10 clusters= 11 CTAs=110 idle_SMs= 60 
+S=11 clusters= 11 CTAs=121 idle_SMs= 49 
+S=12 clusters= 11 CTAs=132 idle_SMs= 38 
+S=13 clusters= 11 CTAs=143 idle_SMs= 27 
+S=14 clusters= 11 CTAs=154 idle_SMs= 16 
+S=15 clusters=  8 CTAs=120 idle_SMs= 50 
+S=16 clusters=  8 CTAs=128 idle_SMs= 42 

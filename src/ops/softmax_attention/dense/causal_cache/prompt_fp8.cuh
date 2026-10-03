@@ -1,3 +1,4 @@
+// Modified by Wavefill (2026): cluster split-KV, FP16 PV accumulation. See docs/wavefill/.
 #pragma once
 
 // Row-scaled E4M3FN-cache causal prompt kernel. Q and cached K use the same fixed D256

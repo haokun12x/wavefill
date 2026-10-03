@@ -1,3 +1,4 @@
+// Modified by Wavefill (2026): rolled K-phase loop for the decode GEMV. See docs/wavefill/.
 #include "ops/linear/nvfp4/nvfp4_shapes.h"
 #include "ops/linear/nvfp4/nvfp4_launch.cuh"
 

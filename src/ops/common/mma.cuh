@@ -1,3 +1,4 @@
+// Modified by Wavefill (2026): FP16-accumulate mma. See docs/wavefill/.
 #pragma once
 
 #include "ops/common/memory.cuh"

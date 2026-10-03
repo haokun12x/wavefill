@@ -1,0 +1,8 @@
+SMs=170 blocks=680 threads=256 chains=8
+bf16 m16n8k16 f32acc :   250.8 TFLOP/s
+f16  m16n8k16 f32acc :   250.8 TFLOP/s
+f16  m16n8k16 f16acc :   500.7 TFLOP/s
+s8   m16n8k32 s32acc :   997.2 TOP/s
+e4m3 m16n8k32 f32acc :   499.2 TFLOP/s
+e4m3 m16n8k32 f16acc :   997.6 TFLOP/s
+status: no error

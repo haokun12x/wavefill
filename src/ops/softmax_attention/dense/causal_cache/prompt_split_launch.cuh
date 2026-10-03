@@ -1,5 +1,7 @@
 #pragma once
 
+// Added by Wavefill (2026). See docs/wavefill/.
+
 // Host side of the cluster key-range split of causal prompt tiles (see prompt_split.cuh): how many
 // CTAs share a tile, and the launch that groups them into clusters.
 

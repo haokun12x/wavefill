@@ -1,3 +1,44 @@
+# Wavefill
+
+**Long-context prefill acceleration for [NInfer](https://github.com/Neroued/ninfer) on the RTX 5090.**
+
+Wavefill is a fork of NInfer, a from-scratch C++/CUDA inference engine for Qwen3.5-family models
+on one GeForce RTX 5090. It speeds up the causal prompt attention that dominates long-prompt
+prefill, plus one decode GEMV. All of NInfer's design, features and most of its code are the
+upstream authors' work; Wavefill's changes are the three commits on top of upstream `9e163eee`.
+
+| Qwen3.8-27B NVFP4, BF16 KV, MTP3, RTX 5090 | NInfer | Wavefill | |
+|---|---:|---:|---:|
+| prefill, 32k-token prompt | 4.25 s | 4.01 s | **1.06×** |
+| prefill, 64k-token prompt | 11.29 s | 10.11 s | **1.12×** |
+| prefill, 128k-token prompt | 33.8 s | 28.6 s | **1.18×** |
+| prompt attention kernel, 1024-token chunk at 64k context (BF16 / INT8 / FP8 KV) | | | **1.40× / 1.29× / 1.35×** |
+| decode, no speculation | 76.9 tok/s | 77.9 tok/s | **+1.25%** |
+
+* **Cluster split-KV for prompt attention.** A 1024-token chunk was 384 whole-SM CTAs on 170 SMs,
+  three waves with the last 26% full. Now the CTAs of a thread-block cluster split each tile's
+  keys and merge through distributed shared memory: no extra workspace, and the split count is
+  picked from the GPU's cluster occupancy.
+* **FP16 P·V accumulation that cannot overflow**, at twice the FP32-accumulate tensor rate:
+  probabilities are taken against each 64-key tile's own max and scaled by 2⁻⁶, then folded back.
+* **NVFP4 down-projection GEMV**: a fully unrolled 102 KiB kernel image was fetched cold every
+  decode step; the K-loop is rolled by 4 (bit-identical output).
+* **Verified** against NInfer's FP64 oracles (plus new split cases), a numerics stress harness
+  (attention sinks, |V| up to 3·10⁴ at 64k keys), compute-sanitizer and a whole-engine SASS diff.
+  End-to-end gains are capped by the card's 600 W power limit, which the faster kernels reach.
+
+Details: [long-context attention](docs/wavefill/long-context-attention.md) ·
+[NVFP4 GEMV](docs/wavefill/nvfp4-down-gemv.md) · [中文概要](docs/wavefill/README.zh-CN.md) ·
+[tools](tools/wavefill/README.md) · [raw results](docs/wavefill/results/).
+Built with an AI coding assistant (Claude Code); measurements and design decisions are documented
+in the links above.
+
+Wavefill is distributed under NInfer's [Apache License 2.0](LICENSE); modified files carry a
+notice. "NInfer" is the upstream project's name and is used here only to identify it. Everything
+below is NInfer's own README, unchanged.
+
+---
+
 # NInfer
 
 > Selected checkpoints. Maximum single-GPU inference performance.

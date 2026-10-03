@@ -1,3 +1,4 @@
+// Modified by Wavefill (2026): envelope passed to the prompt launch. See docs/wavefill/.
 // ninfer::ops - causal cached Softmax Attention validation and finite route dispatch.
 #include "ninfer/ops/softmax_attention.h"
 

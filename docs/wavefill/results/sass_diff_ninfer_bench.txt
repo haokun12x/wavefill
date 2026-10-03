@@ -1,0 +1,11 @@
+functions: old 3042, new 3042, identical SASS 2912
+only in old: 130
+   112  void ninfer::ops::causal_attention_small_t_tc_partial_bf16_kernel<...>
+     6  void ninfer::ops::causal_attention_prompt_i8_kernel<...>
+     6  void ninfer::ops::causal_attention_prompt_bf16_kernel<...>
+     6  void ninfer::ops::causal_attention_prompt_fp8_kernel<...>
+only in new: 130
+   112  void ninfer::ops::causal_attention_small_t_tc_partial_bf16_kernel<...>
+     6  void ninfer::ops::causal_attention_prompt_i8_kernel<...>
+     6  void ninfer::ops::causal_attention_prompt_bf16_kernel<...>
+     6  void ninfer::ops::causal_attention_prompt_fp8_kernel<...>

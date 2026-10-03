@@ -1,5 +1,7 @@
 #pragma once
 
+// Added by Wavefill (2026). See docs/wavefill/.
+
 // Key-range split of one causal prompt tile across the CTAs of a thread-block cluster.
 //
 // A prompt chunk launches one CTA per (64-row query block, query head) and every CTA occupies a

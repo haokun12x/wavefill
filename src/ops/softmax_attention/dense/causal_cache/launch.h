@@ -1,3 +1,4 @@
+// Modified by Wavefill (2026): envelope passed to the prompt launch. See docs/wavefill/.
 #pragma once
 
 // ninfer::ops::detail - private launch prototypes for causal_softmax_attention policies.

@@ -1,3 +1,4 @@
+// Modified by Wavefill (2026): PhaseUnroll schedule parameter. See docs/wavefill/.
 #pragma once
 #include "ops/linear/nvfp4/nvfp4_geometry.h"
 

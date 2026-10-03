@@ -1,0 +1,13 @@
+RTX 5090 (power limit 600 W), ninfer_bench pp65536, BF16 KV, MTP3; nvidia-smi sampled every 100 ms
+while the GPU drew > 200 W.
+
+             SM clock median (min)   power median (max)   temp max   throttle reason
+before       2745 MHz (2550)         588 W (607)          80 C       0x4 SW power cap
+wavefill     2595 MHz (2505)         600 W (602)          82 C       0x4 SW power cap
+
+nsys, one pp65536 prefill:
+             span        prompt attention (1024 launches)   all other kernels   last chunk, per layer
+before       11499 ms    5683 ms                            5778 ms             10.94 ms
+wavefill     10282 ms    4294 ms (1.32x)                    5960 ms (+3.2%)     8.29 ms
+             992 of the 1024 attention launches use 2-CTA clusters; the first two chunks (< 2k
+             context) keep the unsplit path.

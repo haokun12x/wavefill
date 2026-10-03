@@ -1,3 +1,4 @@
+// Modified by Wavefill (2026): rolled K-phase loop for K=17408. See docs/wavefill/.
 #include "core/weight.h"
 #include "ops/linear_add/nvfp4/nvfp4_linear_add_plan.h"
 

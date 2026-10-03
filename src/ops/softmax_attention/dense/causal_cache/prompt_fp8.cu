@@ -1,3 +1,4 @@
+// Modified by Wavefill (2026): cluster split-KV launch. See docs/wavefill/.
 // ninfer::ops::detail - row-scaled E4M3FN-cache causal prompt launch ownership.
 #include "ops/softmax_attention/dense/causal_cache/launch.h"
 

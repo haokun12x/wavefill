@@ -1,3 +1,4 @@
+// Modified by Wavefill (2026): K/V staging overlap. See docs/wavefill/.
 #pragma once
 
 // ninfer::ops - split-KV causal small-T attention, BF16-K/FP16-V partial kernel.

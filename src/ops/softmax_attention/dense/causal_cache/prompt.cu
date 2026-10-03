@@ -1,3 +1,4 @@
+// Modified by Wavefill (2026): cluster split-KV launch. See docs/wavefill/.
 // ninfer::ops - causal_softmax_attention prompt-scale launcher: fill k/v at device
 // positions then launch causal attention over absolute cached history.
 #include "ops/softmax_attention/dense/causal_cache/launch.h"

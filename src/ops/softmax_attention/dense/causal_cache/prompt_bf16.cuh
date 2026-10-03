@@ -1,3 +1,4 @@
+// Modified by Wavefill (2026): cluster split-KV, FP16 PV accumulation. See docs/wavefill/.
 #pragma once
 
 // BF16-cache causal prompt kernel. INT8 has an independent kernel body and resource

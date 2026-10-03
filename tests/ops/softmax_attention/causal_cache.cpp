@@ -1,3 +1,4 @@
+// Modified by Wavefill (2026): split-KV test cases. See docs/wavefill/.
 #include "core/arena.h"
 #include "core/paged_kv_cache.h"
 #include "ninfer/ops/kv_cache_append.h"

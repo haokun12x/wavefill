@@ -1,0 +1,48 @@
+memcheck cached bf16 d256-h24-kv4 1024 8192 :: ========= ERROR SUMMARY: 0 errors
+memcheck append bf16 d256-h24-kv4 1024 8192 :: ========= ERROR SUMMARY: 0 errors
+memcheck cached int8 d256-h24-kv4 1024 8192 :: ========= ERROR SUMMARY: 0 errors
+memcheck append int8 d256-h24-kv4 1024 8192 :: ========= ERROR SUMMARY: 0 errors
+memcheck cached fp8 d256-h24-kv4 1024 8192 :: ========= ERROR SUMMARY: 0 errors
+memcheck append fp8 d256-h24-kv4 1024 8192 :: ========= ERROR SUMMARY: 0 errors
+memcheck cached bf16 d256-h16-kv2 1024 8192 :: ========= ERROR SUMMARY: 0 errors
+memcheck append bf16 d256-h16-kv2 1024 8192 :: ========= ERROR SUMMARY: 0 errors
+memcheck cached bf16 d256-h24-kv4 1 8192 :: ========= ERROR SUMMARY: 0 errors
+memcheck append bf16 d256-h24-kv4 1 8192 :: ========= ERROR SUMMARY: 0 errors
+memcheck cached bf16 d256-h24-kv4 4 8192 :: ========= ERROR SUMMARY: 0 errors
+memcheck append bf16 d256-h24-kv4 4 8192 :: ========= ERROR SUMMARY: 0 errors
+racecheck cached bf16 d256-h24-kv4 1024 8192 :: ========= RACECHECK SUMMARY: 0 hazards displayed (0 errors, 0 warnings)
+racecheck append bf16 d256-h24-kv4 1024 8192 :: ========= RACECHECK SUMMARY: 0 hazards displayed (0 errors, 0 warnings)
+racecheck cached int8 d256-h24-kv4 1024 8192 :: ========= RACECHECK SUMMARY: 0 hazards displayed (0 errors, 0 warnings)
+racecheck append int8 d256-h24-kv4 1024 8192 :: ========= RACECHECK SUMMARY: 0 hazards displayed (0 errors, 0 warnings)
+racecheck cached fp8 d256-h24-kv4 1024 8192 :: ========= RACECHECK SUMMARY: 0 hazards displayed (0 errors, 0 warnings)
+racecheck append fp8 d256-h24-kv4 1024 8192 :: ========= RACECHECK SUMMARY: 0 hazards displayed (0 errors, 0 warnings)
+racecheck cached bf16 d256-h16-kv2 1024 8192 :: ========= RACECHECK SUMMARY: 0 hazards displayed (0 errors, 0 warnings)
+racecheck append bf16 d256-h16-kv2 1024 8192 :: ========= RACECHECK SUMMARY: 0 hazards displayed (0 errors, 0 warnings)
+racecheck cached bf16 d256-h24-kv4 1 8192 :: ========= RACECHECK SUMMARY: 0 hazards displayed (0 errors, 0 warnings)
+racecheck append bf16 d256-h24-kv4 1 8192 :: ========= RACECHECK SUMMARY: 0 hazards displayed (0 errors, 0 warnings)
+racecheck cached bf16 d256-h24-kv4 4 8192 :: ========= RACECHECK SUMMARY: 0 hazards displayed (0 errors, 0 warnings)
+racecheck append bf16 d256-h24-kv4 4 8192 :: ========= RACECHECK SUMMARY: 0 hazards displayed (0 errors, 0 warnings)
+synccheck cached bf16 d256-h24-kv4 1024 8192 :: ========= ERROR SUMMARY: 0 errors
+synccheck append bf16 d256-h24-kv4 1024 8192 :: ========= ERROR SUMMARY: 0 errors
+synccheck cached int8 d256-h24-kv4 1024 8192 :: ========= ERROR SUMMARY: 0 errors
+synccheck append int8 d256-h24-kv4 1024 8192 :: ========= ERROR SUMMARY: 0 errors
+synccheck cached fp8 d256-h24-kv4 1024 8192 :: ========= ERROR SUMMARY: 0 errors
+synccheck append fp8 d256-h24-kv4 1024 8192 :: ========= ERROR SUMMARY: 0 errors
+synccheck cached bf16 d256-h16-kv2 1024 8192 :: ========= ERROR SUMMARY: 0 errors
+synccheck append bf16 d256-h16-kv2 1024 8192 :: ========= ERROR SUMMARY: 0 errors
+synccheck cached bf16 d256-h24-kv4 1 8192 :: ========= ERROR SUMMARY: 0 errors
+synccheck append bf16 d256-h24-kv4 1 8192 :: ========= ERROR SUMMARY: 0 errors
+synccheck cached bf16 d256-h24-kv4 4 8192 :: ========= ERROR SUMMARY: 0 errors
+synccheck append bf16 d256-h24-kv4 4 8192 :: ========= ERROR SUMMARY: 0 errors
+initcheck cached bf16 d256-h24-kv4 1024 8192 :: ========= ERROR SUMMARY: 0 errors
+initcheck append bf16 d256-h24-kv4 1024 8192 :: ========= ERROR SUMMARY: 0 errors
+initcheck cached int8 d256-h24-kv4 1024 8192 :: ========= ERROR SUMMARY: 0 errors
+initcheck append int8 d256-h24-kv4 1024 8192 :: ========= ERROR SUMMARY: 0 errors
+initcheck cached fp8 d256-h24-kv4 1024 8192 :: ========= ERROR SUMMARY: 0 errors
+initcheck append fp8 d256-h24-kv4 1024 8192 :: ========= ERROR SUMMARY: 0 errors
+initcheck cached bf16 d256-h16-kv2 1024 8192 :: ========= ERROR SUMMARY: 0 errors
+initcheck append bf16 d256-h16-kv2 1024 8192 :: ========= ERROR SUMMARY: 0 errors
+initcheck cached bf16 d256-h24-kv4 1 8192 :: ========= ERROR SUMMARY: 0 errors
+initcheck append bf16 d256-h24-kv4 1 8192 :: ========= ERROR SUMMARY: 0 errors
+initcheck cached bf16 d256-h24-kv4 4 8192 :: ========= ERROR SUMMARY: 0 errors
+initcheck append bf16 d256-h24-kv4 4 8192 :: ========= ERROR SUMMARY: 0 errors

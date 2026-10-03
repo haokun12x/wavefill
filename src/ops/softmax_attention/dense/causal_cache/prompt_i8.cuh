@@ -1,3 +1,4 @@
+// Modified by Wavefill (2026): cluster split-KV, FP16 PV accumulation. See docs/wavefill/.
 #pragma once
 
 // INT8-cache causal prompt kernel for the registered head geometries. Q and cached K use the same

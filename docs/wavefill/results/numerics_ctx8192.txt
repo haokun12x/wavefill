@@ -1,0 +1,27 @@
+context=8192 tokens=1024 sampled rows=48 (x256 values)
+regime        kernel            rel_l2     max_abs max_abs/maxref nonfinite
+uniform       bf16(oracle)   1.669e-03   6.076e-05     2.472e-03         -
+uniform       head fp32      1.675e-03   6.160e-05     2.507e-03         0
+uniform       new S=1        1.703e-03   6.323e-05     2.573e-03         0
+uniform       new S=2        1.703e-03   6.323e-05     2.573e-03         0
+uniform       new S=4        1.703e-03   6.323e-05     2.573e-03         0
+peaked        bf16(oracle)   1.665e-03   3.736e-03     2.265e-03         -
+peaked        head fp32      1.667e-03   3.736e-03     2.265e-03         0
+peaked        new S=1        1.689e-03   3.736e-03     2.265e-03         0
+peaked        new S=2        1.690e-03   3.736e-03     2.265e-03         0
+peaked        new S=4        1.690e-03   3.736e-03     2.265e-03         0
+sink          bf16(oracle)   1.613e-03   7.808e-03     2.175e-03         -
+sink          head fp32      1.613e-03   7.827e-03     2.180e-03         0
+sink          new S=1        1.614e-03   7.817e-03     2.177e-03         0
+sink          new S=2        1.614e-03   7.817e-03     2.177e-03         0
+sink          new S=4        1.614e-03   7.817e-03     2.177e-03         0
+outlier_v     bf16(oracle)   1.404e-03   9.402e-01     2.108e-03         -
+outlier_v     head fp32      1.404e-03   9.402e-01     2.108e-03         0
+outlier_v     new S=1        1.440e-03   9.402e-01     2.108e-03         0
+outlier_v     new S=2        1.440e-03   9.402e-01     2.108e-03         0
+outlier_v     new S=4        1.440e-03   9.402e-01     2.108e-03         0
+sink_outlier  bf16(oracle)   1.392e-03   3.066e+01     2.470e-03         -
+sink_outlier  head fp32      1.392e-03   3.066e+01     2.470e-03         0
+sink_outlier  new S=1        1.392e-03   3.066e+01     2.470e-03         0
+sink_outlier  new S=2        1.392e-03   3.066e+01     2.470e-03         0
+sink_outlier  new S=4        1.392e-03   3.066e+01     2.470e-03         0
