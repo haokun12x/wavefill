@@ -1,0 +1,1129 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wavefill</title>
+<meta name="description" content="Wavefill：在 RTX 5090 上把超长上下文 prefill 填满每一个 SM。cluster split-KV 与不会溢出的 FP16 累加 P·V，基于 NInfer。">
+<meta name="theme-color" content="#0a0a0b">
+<meta property="og:title" content="Wavefill · 把超长上下文 prefill 优化进芯片里">
+<meta property="og:description" content="RTX 5090 上的性能边界分析与长上下文 prefill 优化：注意力内核 1.40×，agent 增量 3.42×，128k 冷启动 28.5 s。">
+<meta property="og:image" content="https://haokun12x.github.io/wavefill/assets/poster.jpg">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230a0a0b'/%3E%3Cpath d='M12 22l8 22 8-18 8 18 8-22' fill='none' stroke='%23c9a96e' stroke-width='3.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M12 50h40' stroke='%23c9a96e' stroke-opacity='.45' stroke-width='2'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:opsz,wght@6..96,400;6..96,500&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400&family=Inter:wght@300;400;500&family=JetBrains+Mono:wght@300;400;500&family=Noto+Sans+SC:wght@300;400;500&family=Noto+Serif+SC:wght@300;400;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0a0a0b; --bg2:#0e0e10; --panel:#121215; --panel2:#16161a;
+  --line:rgba(236,230,218,.085); --line2:rgba(236,230,218,.16);
+  --ivory:#efe9dd; --text:#cbc5ba; --muted:#8e897f; --faint:#5c5953;
+  --gold:#c9a96e; --gold2:#e6cc96; --golddim:#7d6844; --golda:rgba(201,169,110,.13);
+  --steel:#8d939b; --steel2:#5e636a; --steel3:#3d4147;
+  --display:"Cormorant Garamond","Noto Serif SC",Georgia,serif;
+  --num:"Bodoni Moda","Cormorant Garamond",Georgia,serif;
+  --serif:"Noto Serif SC","Songti SC","STSong",Georgia,serif;
+  --sans:"Inter","Noto Sans SC","PingFang SC","Hiragino Sans GB","Microsoft YaHei",system-ui,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --w:1160px;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+body{margin:0;font-variant-numeric:lining-nums;font-feature-settings:"lnum" 1;background:var(--bg);color:var(--text);font:300 16px/1.85 var(--sans);letter-spacing:.01em;overflow-x:hidden;-webkit-font-smoothing:antialiased}
+a{color:inherit;text-decoration:none}
+::selection{background:rgba(201,169,110,.32);color:#fff}
+.wrap{max-width:var(--w);margin:0 auto;padding:0 40px}
+@media (max-width:720px){.wrap{padding:0 16px}}
+.mono{font-family:var(--mono)}
+.gold{color:var(--gold)}
+.ivory{color:var(--ivory)}
+sup,sub{line-height:0}
+
+/* nav */
+nav{position:fixed;inset:0 0 auto 0;z-index:50;transition:background .5s,border-color .5s,backdrop-filter .5s;border-bottom:1px solid transparent}
+nav.scrolled{background:rgba(10,10,11,.78);backdrop-filter:blur(14px) saturate(1.2);-webkit-backdrop-filter:blur(14px) saturate(1.2);border-bottom-color:var(--line)}
+nav .wrap{display:flex;align-items:center;justify-content:space-between;height:68px}
+.brand{display:flex;align-items:center;gap:12px;font:400 15px var(--mono);letter-spacing:.42em;color:var(--ivory)}
+.brand svg{width:22px;height:22px}
+.navlinks{display:flex;gap:30px;font-size:13px;letter-spacing:.12em;color:var(--muted)}
+.navlinks a{transition:color .3s}
+.navlinks a:hover{color:var(--gold2)}
+@media (max-width:900px){.navlinks a.opt{display:none}}
+@media (max-width:560px){.navlinks{gap:18px}.brand{letter-spacing:.3em;font-size:13px}}
+
+/* hero */
+.hero{position:relative;min-height:100vh;min-height:100svh;display:flex;align-items:flex-end;padding:120px 0 64px;overflow:hidden}
+#chip{position:absolute;inset:0;width:100%;height:100%;opacity:.95}
+.hero::after{content:"";position:absolute;inset:0;background:radial-gradient(ellipse 70% 60% at 20% 70%,rgba(10,10,11,.92),rgba(10,10,11,.35) 70%,rgba(10,10,11,0)),linear-gradient(to top,var(--bg),rgba(10,10,11,0) 40%);pointer-events:none}
+.hero .wrap{position:relative;z-index:2;width:100%}
+.eyebrow{font:400 12px var(--mono);letter-spacing:.32em;text-transform:uppercase;color:var(--gold)}
+.hero h1{font:300 clamp(64px,12vw,152px)/.9 var(--display);letter-spacing:.01em;color:var(--ivory);margin:22px 0 18px}
+.hero h1 i{font-style:italic;color:var(--gold2)}
+.tagline{font:300 clamp(20px,2.6vw,30px)/1.5 var(--serif);color:var(--ivory);letter-spacing:.06em;margin:0 0 22px}
+.lead{max-width:560px;color:var(--text);font-size:16px;margin:0 0 34px}
+.ctas{display:flex;flex-wrap:wrap;gap:14px;margin-bottom:64px}
+.btn{display:inline-flex;align-items:center;gap:10px;height:46px;padding:0 24px;border:1px solid var(--line2);font:400 13px var(--sans);letter-spacing:.16em;color:var(--ivory);transition:border-color .35s,background .35s,color .35s}
+.btn:hover{border-color:var(--gold);color:var(--gold2)}
+.btn.primary{border-color:var(--gold);background:var(--golda);color:var(--gold2)}
+.btn.primary:hover{background:rgba(201,169,110,.22)}
+.btn svg{width:14px;height:14px}
+.figs{display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--line2)}
+.fig{padding:26px 26px 4px 0;border-right:1px solid var(--line)}
+.fig+.fig{padding-left:26px}
+.fig:last-child{border-right:0}
+.fig b{display:block;font:400 clamp(38px,4.4vw,56px)/1 var(--num);color:var(--ivory);letter-spacing:.01em}
+.fig b small{font:300 .4em var(--sans);color:var(--gold);margin-left:6px}
+.fig span{display:block;margin-top:12px;font-size:13px;line-height:1.7;color:var(--muted)}
+@media (max-width:900px){.figs{grid-template-columns:1fr 1fr}.fig:nth-child(2){border-right:0}.fig:nth-child(3){padding-left:0}.fig:nth-child(n+3){border-top:1px solid var(--line)}}
+@media (max-width:480px){.fig{padding:20px 14px 4px 0}.fig+.fig{padding-left:14px}.fig:nth-child(3){padding-left:0}}
+
+/* sections */
+section{position:relative;padding:136px 0 0}
+@media (max-width:720px){section{padding-top:96px}}
+.sec-h{display:grid;grid-template-columns:120px 1fr;gap:0 40px;margin-bottom:64px}
+.sec-h .num{font:300 64px/1 var(--display);color:var(--golddim);font-style:italic}
+.kicker{font:400 12px var(--mono);letter-spacing:.3em;color:var(--gold);text-transform:uppercase}
+.sec-h h2{font:300 clamp(30px,4vw,46px)/1.3 var(--serif);color:var(--ivory);margin:14px 0 18px;letter-spacing:.04em}
+.dek{max-width:760px;margin:0;color:var(--text)}
+@media (max-width:720px){.sec-h{grid-template-columns:1fr;margin-bottom:44px}.sec-h .num{font-size:44px;margin-bottom:10px}}
+.rule{height:1px;background:linear-gradient(90deg,transparent,var(--line2) 18%,var(--line2) 82%,transparent);margin-top:136px}
+
+h3{font:400 22px/1.5 var(--serif);color:var(--ivory);margin:0 0 14px;letter-spacing:.04em}
+h4{font:400 12px var(--mono);letter-spacing:.24em;text-transform:uppercase;color:var(--gold);margin:0 0 14px}
+p{margin:0 0 16px}
+.prose{max-width:760px}
+.prose strong,.card strong,.note strong{color:var(--ivory);font-weight:500}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:56px}
+.grid2.wide{grid-template-columns:1.25fr 1fr}
+.grid2>*,.grid3>*,.cards>*,.docs>*,.verify>*{min-width:0}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line);border:1px solid var(--line)}
+@media (max-width:900px){.grid2,.grid2.wide{grid-template-columns:1fr;gap:40px}.grid3{grid-template-columns:1fr}}
+.cell{background:var(--bg);padding:34px 30px}
+.cell .big{font:400 50px/1 var(--num);color:var(--ivory)}
+.cell .big small{font-size:.42em;color:var(--gold);margin-left:6px;letter-spacing:.06em}
+.cell .lbl{font:400 12px var(--mono);letter-spacing:.2em;color:var(--gold);margin:16px 0 12px;text-transform:uppercase}
+.cell p{font-size:14.5px;color:var(--muted);margin:0}
+.panel{background:linear-gradient(180deg,var(--panel),var(--bg2));border:1px solid var(--line);padding:34px}
+@media (max-width:720px){.panel{padding:22px 16px}}
+.caption{font-size:13px;color:var(--muted);margin-top:16px;line-height:1.75}
+.caption b{color:var(--text);font-weight:400}
+
+/* equations */
+.eq{font:300 19px/1.9 var(--display);color:var(--ivory);padding:22px 26px;border-left:1px solid var(--gold);background:linear-gradient(90deg,var(--golda),transparent);margin:22px 0;overflow-x:auto;white-space:nowrap}
+.eq i{font-style:italic}
+.eq .c{font:300 13px var(--sans);color:var(--muted);margin-left:14px;white-space:normal}
+.eq.small{font-size:17px}
+
+/* film */
+.film{position:relative;border:1px solid var(--line2);background:#000;box-shadow:0 40px 120px -40px rgba(201,169,110,.18),0 0 0 1px rgba(0,0,0,.6)}
+.film video{display:block;width:100%;height:auto;aspect-ratio:16/9;background:#000}
+.film::before,.film::after{content:"";position:absolute;width:26px;height:26px;border:1px solid var(--gold);pointer-events:none}
+.film::before{left:-9px;top:-9px;border-right:0;border-bottom:0}
+.film::after{right:-9px;bottom:-9px;border-left:0;border-top:0}
+.chapters{display:grid;grid-template-columns:repeat(5,1fr);gap:1px;background:var(--line);border:1px solid var(--line);margin-top:34px}
+.chapters button{all:unset;cursor:pointer;background:var(--bg);padding:14px 16px;display:flex;gap:12px;align-items:baseline;transition:background .3s}
+.chapters button:hover,.chapters button.on{background:var(--panel2)}
+.chapters button.on .t{color:var(--gold2)}
+.chapters .t{font:400 12px var(--mono);color:var(--gold);min-width:42px}
+.chapters .n{font-size:13.5px;color:var(--text)}
+.chapters button:focus-visible{outline:1px solid var(--gold);outline-offset:-1px}
+@media (max-width:900px){.chapters{grid-template-columns:repeat(3,1fr)}}
+@media (max-width:560px){.chapters{grid-template-columns:1fr 1fr}}
+
+/* charts */
+svg.chart{display:block;width:100%;height:auto;overflow:visible}
+svg text{font-family:var(--sans);fill:var(--muted)}
+svg .m{font-family:var(--mono)}
+.seg{display:inline-flex;flex-wrap:wrap;border:1px solid var(--line2);margin-bottom:24px}
+.seg button{all:unset;cursor:pointer;padding:9px 16px;font:400 12.5px var(--mono);letter-spacing:.08em;color:var(--muted);transition:color .3s,background .3s;border-right:1px solid var(--line)}
+.seg button:last-child{border-right:0}
+.seg button:hover{color:var(--ivory)}
+.seg button.on{background:var(--golda);color:var(--gold2)}
+.seg button:focus-visible{outline:1px solid var(--gold);outline-offset:-1px}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line);border:1px solid var(--line);margin-top:24px}
+.stats div{background:var(--bg);padding:16px 18px}
+.stats b{display:block;font:400 30px/1.1 var(--num);color:var(--ivory)}
+.stats span{font-size:12.5px;color:var(--muted)}
+
+/* ledger */
+.ledger{width:100%;border-collapse:collapse;font-size:14.5px}
+.ledger th{font:400 11.5px var(--mono);letter-spacing:.16em;color:var(--faint);text-align:left;padding:0 12px 14px 0;border-bottom:1px solid var(--line2);text-transform:uppercase;white-space:nowrap}
+.ledger td{padding:16px 12px 16px 0;border-bottom:1px solid var(--line);vertical-align:middle}
+.ledger td.v{font-family:var(--mono);font-size:13.5px;color:var(--text);white-space:nowrap}
+.ledger td.x{font:400 30px/1 var(--num);color:var(--gold2);text-align:right;white-space:nowrap;padding-right:0}
+.ledger td.x small{font-size:.62em;color:var(--gold);font-family:var(--sans);font-weight:300;margin-left:2px}
+.ledger .what{color:var(--ivory)}
+.ledger .what em{display:block;font-style:normal;color:var(--muted);font-size:12.5px;margin-top:2px}
+.ledger .bar{position:relative;height:2px;background:var(--line);min-width:90px}
+.ledger .bar i{position:absolute;left:0;top:-1px;height:4px;background:linear-gradient(90deg,var(--golddim),var(--gold2))}
+.tscroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.tscroll,.eq{scrollbar-width:thin;scrollbar-color:var(--golddim) transparent}
+.eq::-webkit-scrollbar,.tscroll::-webkit-scrollbar{height:4px}.eq::-webkit-scrollbar-thumb,.tscroll::-webkit-scrollbar-thumb{background:var(--golddim)}
+@media (max-width:720px){.ledger .barc{display:none}.ledger td.x{font-size:24px}}
+
+table.data{width:100%;border-collapse:collapse;font-size:14px}
+table.data th{font:400 11.5px var(--mono);letter-spacing:.12em;color:var(--faint);text-align:right;padding:0 0 12px 16px;border-bottom:1px solid var(--line2);white-space:nowrap}
+table.data th:first-child,table.data td:first-child{text-align:left;padding-left:0}
+table.data td{padding:12px 0 12px 16px;border-bottom:1px solid var(--line);text-align:right;font-family:var(--mono);font-size:13px;white-space:nowrap}
+table.data td:first-child{font-family:var(--sans);font-size:14px;color:var(--text);white-space:normal}
+table.data td.w{color:var(--gold2)}
+table.data td.na{color:var(--faint)}
+
+.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line);border:1px solid var(--line)}
+.card{background:var(--bg);padding:30px 28px}
+.card p{font-size:14.5px;color:var(--muted);margin:0}
+@media (max-width:900px){.cards{grid-template-columns:1fr}}
+
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 34px}
+.chips span{font:400 12px var(--mono);letter-spacing:.06em;color:var(--text);border:1px solid var(--line2);padding:6px 12px}
+
+.note{font-size:13.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:18px;margin-top:28px;max-width:860px}
+.note p{margin:0 0 8px}
+
+.verify{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line);border:1px solid var(--line)}
+.verify div{background:var(--bg);padding:30px 28px}
+.verify b{display:block;font:400 44px/1 var(--num);color:var(--ivory)}
+.verify b small{font-size:.45em;color:var(--gold);margin-left:6px}
+.verify h5{font:400 15px var(--serif);color:var(--ivory);margin:16px 0 8px;letter-spacing:.04em}
+.verify p{font-size:13.5px;color:var(--muted);margin:0}
+@media (max-width:900px){.verify{grid-template-columns:1fr 1fr}}
+@media (max-width:560px){.verify{grid-template-columns:1fr}}
+
+.docs{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--line);border:1px solid var(--line)}
+.docs a{background:var(--bg);padding:30px 28px 28px;display:flex;flex-direction:column;gap:10px;min-height:190px;transition:background .35s}
+.docs a:hover{background:var(--panel2)}
+.docs a:hover .arrow{transform:translateX(6px);color:var(--gold2)}
+.docs .k{font:400 11.5px var(--mono);letter-spacing:.22em;color:var(--gold);text-transform:uppercase}
+.docs .t{font:400 20px/1.45 var(--serif);color:var(--ivory);letter-spacing:.03em}
+.docs .d{font-size:13.5px;color:var(--muted);flex:1}
+.docs .arrow{font-family:var(--mono);color:var(--muted);transition:transform .35s,color .35s}
+@media (max-width:900px){.docs{grid-template-columns:1fr 1fr}}
+@media (max-width:560px){.docs{grid-template-columns:1fr}}
+
+.quote{font:300 clamp(24px,3.2vw,38px)/1.6 var(--serif);color:var(--ivory);letter-spacing:.05em;max-width:900px;margin:0}
+.quote em{font-style:normal;color:var(--gold2)}
+
+footer{margin-top:150px;border-top:1px solid var(--line);padding:46px 0 60px;font-size:13px;color:var(--faint)}
+footer .wrap{display:flex;flex-wrap:wrap;justify-content:space-between;gap:20px}
+footer a{color:var(--muted)}
+footer a:hover{color:var(--gold2)}
+
+.reveal{opacity:0;transform:translateY(22px);transition:opacity 1.1s cubic-bezier(.2,.7,.2,1),transform 1.1s cubic-bezier(.2,.7,.2,1)}
+.reveal.in{opacity:1;transform:none}
+@media (prefers-reduced-motion:reduce){.reveal{opacity:1;transform:none;transition:none}html{scroll-behavior:auto}}
+.legend{display:flex;flex-wrap:wrap;gap:18px;font-size:12.5px;color:var(--muted);margin-top:14px}
+.legend i{display:inline-block;width:12px;height:12px;margin-right:8px;vertical-align:-1px}
+</style>
+</head>
+<body>
+
+<nav id="nav">
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="Wavefill">
+      <svg viewBox="0 0 64 64" aria-hidden="true"><path d="M8 18l10 28 14-30 14 30 10-28" fill="none" stroke="#c9a96e" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      WAVEFILL
+    </a>
+    <div class="navlinks">
+      <a href="#film">影片</a>
+      <a class="opt" href="#ceiling">上限</a>
+      <a class="opt" href="#waves">波次</a>
+      <a href="#versus">对比</a>
+      <a class="opt" href="#docs">文档</a>
+      <a href="https://github.com/haokun12x/wavefill">GitHub</a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <canvas id="chip" aria-hidden="true"></canvas>
+  <div class="wrap">
+    <div class="eyebrow">GeForce RTX 5090 · GB202 · sm_120a · Qwen3.8-27B</div>
+    <h1>Wave<i>fill</i></h1>
+    <p class="tagline">让超长上下文的每一波计算，都填满芯片。</p>
+    <p class="lead">Wavefill 基于开源推理引擎 NInfer，包含一组内核优化和一份完整的性能分析。方法是：先实测硬件上限，再建立只有一两个参数的性能模型；用模型找出损失、预测收益，最后在整机上验证。目标是让 agent 超长上下文的 prefill 用满 170 个 SM 中的每一个。</p>
+    <div class="ctas">
+      <a class="btn primary" href="#film"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5v11l9-5.5z" fill="currentColor"/></svg>观看影片 · 5:47</a>
+      <a class="btn" href="https://github.com/haokun12x/wavefill/blob/main/docs/wavefill/technical-report.zh-CN.md">阅读技术报告</a>
+      <a class="btn" href="https://github.com/haokun12x/wavefill">源代码</a>
+    </div>
+    <div class="figs">
+      <div class="fig"><b data-count="1.40" data-dec="2">1.40<small>×</small></b><span>prefill 注意力内核<br>64k 上下文 · BF16 KV</span></div>
+      <div class="fig"><b data-count="3.42" data-dec="2">3.42<small>×</small></b><span>agent 增量注意力<br>64k 历史上追加 128 token</span></div>
+      <div class="fig"><b data-count="28.5" data-dec="1">28.5<small>s</small></b><span>128k 冷启动到首 token<br><span id="hero-128k">vLLM 31.7 s · NInfer 34.3 s</span></span></div>
+      <div class="fig"><b data-count="88" data-dec="0">88<small>%</small></b><span>decode 达到实测带宽下界<br>77.6 tok/s · 单请求</span></div>
+    </div>
+  </div>
+</header>
+
+<!-- FILM -->
+<section id="film">
+  <div class="wrap">
+    <div class="sec-h reveal">
+      <div class="num" style="font-style:normal;font-family:var(--serif);font-size:52px">序</div>
+      <div>
+        <div class="kicker">The Film · 影片</div>
+        <h2>从带宽上限，到芯片里的波次</h2>
+        <p class="dek">影片 5 分 47 秒，讲清这个项目的来龙去脉：先看清芯片，再测出两种上限；然后说明 decode 为什么已经到顶、prefill 的损失在哪里，以及两项优化如何把损失拿回来。所有数字都是本机实测。</p>
+      </div>
+    </div>
+    <div class="film reveal">
+      <video id="video" controls preload="metadata" playsinline poster="assets/poster.jpg">
+        <source src="assets/wavefill.mp4" type="video/mp4">
+      </video>
+    </div>
+    <div class="chapters reveal" id="chapters"></div>
+  </div>
+</section>
+
+<!-- I CEILING -->
+<section id="ceiling">
+  <div class="wrap">
+    <div class="sec-h reveal">
+      <div class="num">I</div>
+      <div>
+        <div class="kicker">The Ceiling · 上限</div>
+        <h2>先测清天花板</h2>
+        <p class="dek">不知道上限，就无法判断一个内核“好不好”。所有效率都以本机实测的上限为分母，不用规格书的名义值。</p>
+      </div>
+    </div>
+
+    <div class="grid3 reveal">
+      <div class="cell">
+        <div class="big">1.70<small>TB/s</small></div>
+        <div class="lbl">DRAM 纯读上限</div>
+        <p>TMA bulk 拷贝和 <span class="mono">ld.global.nc.v4</span> 是两条完全不同的数据通路，结果都停在 1702–1705 GB/s，即名义值的 95%。按 Little 定律，全卡要约 1 MiB 的在途读请求才能喂饱 DRAM（有负载时延迟约 450 ns）。</p>
+      </div>
+      <div class="cell">
+        <div class="big">251 <span style="color:var(--faint)">/</span> 501<small>TFLOP/s</small></div>
+        <div class="lbl">mma.sync · FP32 / FP16 累加</div>
+        <p>同一个张量核心，FP16 累加的吞吐恰好是 FP32 累加的两倍。这个 2× 是后文第二项优化的出发点。</p>
+      </div>
+      <div class="cell">
+        <div class="big">600<small>W</small></div>
+        <div class="lbl">功耗墙</div>
+        <p>长时间 prefill 会持续顶在功耗墙上。内核越忙，DVFS 给出的频率越低：SM 频率中位数从 2745 MHz 降到 2595 MHz。</p>
+      </div>
+    </div>
+
+    <div class="grid2" style="margin-top:72px">
+      <div class="reveal">
+        <h4>Roofline</h4>
+        <h3>一边贴着斜线，一边远离屋顶</h3>
+        <p class="prose">可达性能 <span class="mono">P = min(π, β·I)</span>。decode 每读一个字节只做 2–3.6 次运算，比拐点低 40–70 倍，被钉在带宽斜线上。prefill 注意力的算术强度是 6144 FLOP/B，远在拐点右侧，属于计算受限，但原内核只用到峰值的 60%。</p>
+        <p class="prose">两段要用完全不同的思路对待：decode 只能<strong>移动上限</strong>，prefill 则要<strong>找回损失</strong>。</p>
+      </div>
+      <div class="panel reveal"><svg class="chart" id="roofline" viewBox="0 0 560 430" role="img" aria-label="Roofline 图"></svg></div>
+    </div>
+
+    <div class="grid2" style="margin-top:88px">
+      <div class="reveal">
+        <h4>decode · 已经到顶</h4>
+        <h3>13.1 ms 里只差 1.71 ms</h3>
+        <p class="prose">生成一个 token 要跑 641 个内核、读 19.35 GB，带宽下界是 <strong>11.4 ms</strong>（88 tok/s），实测 12.9–13.1 ms，GPU 忙碌率 98.6%。剩下的差距里没有能大块挖回的部分。</p>
+        <p class="prose">最大的短板是 NVFP4 下投影 GEMV。它在真实 decode 里只跑到带宽的 83%，单独跑却有 97%，区别只在于它前面跑的是哪个内核。根因是<strong>冷取指</strong>：全展开后的代码有 6520 条指令（102 KiB），每条指令只执行一次，每层调用时都要从 L2 重新取。把循环收成 4 路后，代码缩到 20 KiB，内核从 35.14 µs 降到 32.58 µs，整机 decode <strong>+1.25%</strong>，输出逐位不变。</p>
+      </div>
+      <div class="panel reveal">
+        <svg class="chart" id="decodegap" viewBox="0 0 560 250" role="img" aria-label="decode 时间构成"></svg>
+        <p class="caption">再往上，预取、PDL 和小内核融合加起来，现实上只有 +4–8%。要大幅提速，只能减少每 token 读取的字节数，或者每读一遍权重产出更多 token：MTP3 投机解码已经做到 2×。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="wrap"><div class="rule"></div></div>
+
+<!-- II CHIP -->
+<section id="chip-sec">
+  <div class="wrap">
+    <div class="sec-h reveal">
+      <div class="num">II</div>
+      <div>
+        <div class="kicker">The Chip · 芯片</div>
+        <h2>用簇驻留能力，反推 GPC 拓扑</h2>
+        <p class="dek">线程块簇的 S 个 CTA 必须同时落在同一个 GPC 里。实测不同簇大小时全卡最多能同时驻留多少个簇，就能推出芯片的布局：<strong>8 个 16-SM GPC 加 3 个 14-SM GPC</strong>。完整的 GB202 是 12 个 GPC、192 个 SM，这块卡屏蔽了一个完整 GPC 和 3 个 TPC。</p>
+      </div>
+    </div>
+    <div class="grid2 wide">
+      <div class="panel reveal">
+        <div class="seg" id="sseg" role="group" aria-label="簇大小"></div>
+        <svg class="chart" id="gpc" viewBox="0 0 600 350" role="img" aria-label="GPC 与簇驻留示意"></svg>
+        <div class="stats">
+          <div><b id="st-c">170</b><span>同时驻留的簇</span></div>
+          <div><b id="st-u">170</b><span>占用 SM</span></div>
+          <div><b id="st-w">0</b><span>空闲 SM</span></div>
+        </div>
+        <p class="caption">示意图。哪几个 GPC 少了 2 个 SM，软件看不到，位置是随意画的；数量是实测值。</p>
+      </div>
+      <div class="reveal">
+        <h4>推理过程</h4>
+        <p>S = 9…14 时驻留簇数恒为 11，说明有 <strong>11 个 GPC</strong>，而且每个至少有 14 个 SM。S = 15、16 时是 8，说明其中 <strong>8 个有 16 个 SM</strong>。170 − 8×16 = 42 = 3×14。</p>
+        <div class="eq small">C<sub>S</sub> = 8·⌊16/S⌋ + 3·⌊14/S⌋</div>
+        <p>S = 1…8 的实测值 170、85、52、41、30、22、22、19，全部与上式吻合。由此还能得到两条结论：</p>
+        <p><strong>S = 2 是唯一不浪费 SM 的簇大小</strong>，因为所有 GPC 的 SM 数都是偶数。<strong>S = 7 严格优于 S = 6</strong>，两者驻留的簇数一样多，但 S = 7 用了 154 个 SM。</p>
+        <p style="color:var(--muted);font-size:14.5px">主机端在启动时调用 <span class="mono">cudaOccupancyMaxActiveClusters</span> 读出这张表，簇大小的选择直接以芯片的实际拓扑为输入。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="wrap"><div class="rule"></div></div>
+
+<!-- III WAVES -->
+<section id="waves">
+  <div class="wrap">
+    <div class="sec-h reveal">
+      <div class="num">III</div>
+      <div>
+        <div class="kicker">The Waves · 波次</div>
+        <h2>60% = 75.3% × 80%</h2>
+        <p class="dek">head dim 是 256，原内核的 Q/K/V 占了 96 KB 共享内存（上限 99 KB），寄存器用到 254/255，所以一个 SM 只能放一个 CTA。一个 tile 独占一个 SM，170 个 SM 一波一波地跑。只要 tile 数不是 170 的整数倍，最后一波就会有 SM 空转。</p>
+      </div>
+    </div>
+
+    <div class="panel reveal">
+      <div class="seg" id="tseg" role="group" aria-label="追加 token 数"></div>
+      <svg class="chart" id="wavesvg" viewBox="0 0 1060 330" role="img" aria-label="波次示意"></svg>
+      <div class="legend"><span><i style="background:var(--steel2)"></i>原内核：每个 tile 一个 CTA</span><span><i style="background:var(--gold)"></i>Wavefill：S 个 CTA 组成一个簇，平分同一个 tile 的 key</span><span><i style="background:transparent;border:1px solid var(--line2)"></i>空转的 SM</span></div>
+      <p class="caption">横轴是 170 个 SM，纵轴是时间，面积就是工作量。上下文 64k，24 个查询头，每个 tile 是 64 行查询 × 一个头。右侧的 TFLOP/s 是实测值，包含两项优化的共同效果。</p>
+    </div>
+
+    <div class="grid2" style="margin-top:72px">
+      <div class="reveal">
+        <h4>一个参数解释六个形状</h4>
+        <h3>实测吞吐 ÷ 波次效率 = 常数</h3>
+        <div class="eq">η(T) = U / (170·⌈U/170⌉),&nbsp;&nbsp; U = ⌈T/64⌉ × 24</div>
+        <p>上下文远大于 T 时，各 tile 的工作量几乎相同，所以内核吞吐应该等于 η(T) 乘以一个与 T 无关的单 SM 效率 R。六个形状的实测值都落在 <strong>R = 200 TFLOP/s</strong> 上，误差在 ±0.7% 以内；改后同样是一个常数，<strong>R = 230</strong>。</p>
+        <p>于是原内核的 60% 可以精确拆成两个相乘的因子：75.3% 的波次效率，乘以 80% 的单 SM 效率（200/251）。两个因子分别用一项优化处理。</p>
+      </div>
+      <div class="panel reveal"><svg class="chart" id="rconst" viewBox="0 0 560 330" role="img" aria-label="实测除以波次效率"></svg></div>
+    </div>
+  </div>
+</section>
+
+<div class="wrap"><div class="rule"></div></div>
+
+<!-- IV TWO CUTS -->
+<section id="cuts">
+  <div class="wrap">
+    <div class="sec-h reveal">
+      <div class="num">IV</div>
+      <div>
+        <div class="kicker">Two Cuts · 两项优化</div>
+        <h2>填满波次，抬高屋顶</h2>
+        <p class="dek">第一项用线程块簇把空转的 SM 填满，第二项把一半运算换到双倍吞吐的累加路径上。两项都不需要额外显存，也都以可证明的数学性质为前提。</p>
+      </div>
+    </div>
+
+    <div class="grid2">
+      <div class="reveal">
+        <h4>① cluster split-KV</h4>
+        <h3>在线 softmax 是一个幺半群</h3>
+        <p>把一段 key 上的部分结果记为三元组 s = (m, ℓ, <b>o</b>)，两段可以合并：</p>
+        <div class="eq small">s₁ ⊕ s₂ = ( M,&nbsp; ℓ₁e<sup>m₁−M</sup> + ℓ₂e<sup>m₂−M</sup>,&nbsp; <b>o</b>₁e<sup>m₁−M</sup> + <b>o</b>₂e<sup>m₂−M</sup> )</div>
+        <p>⊕ 满足结合律和交换律，单位元是 (−∞, 0, <b>0</b>)。所以 key 范围可以任意切分、以任意顺序合并，在精确算术下结果都相同；实现里固定按 rank 顺序归约，保证同样的输入得到同样的输出。</p>
+        <p>同一个簇里的 S 个 CTA 通过<strong>分布式共享内存</strong>（DSMEM）直接读取彼此的部分和，3 次 <span class="mono">cluster.sync()</span> 就在片上完成合并。Flash-Decoding 式的做法要 50 MB 全局工作区外加第二个内核，这里都不需要。</p>
+        <p>主机端用代价模型选择 S，最大可选 8：</p>
+        <div class="eq small">cost(S) = ⌈U / C<sub>S</sub>⌉ · ( ⌈B̄ / S⌉ + δ·[S&gt;1] )</div>
+      </div>
+      <div class="panel reveal">
+        <svg class="chart" id="spred" viewBox="0 0 560 330" role="img" aria-label="簇大小预测与实测"></svg>
+        <p class="caption">64k 上下文、1024 token 分块。8 种簇大小的预测与实测最大偏差是 3.3%，排序完全一致：S = 6 只用了 132 个 SM，甚至比不切分还慢。S = 2 时等效 2.5 波，波次填充率 90.4%。</p>
+      </div>
+    </div>
+
+    <div class="grid2" style="margin-top:96px">
+      <div class="reveal">
+        <h4>② FP16 累加 P·V</h4>
+        <h3>可证明不溢出，也不掉进次正规区</h3>
+        <p>QK 和 PV 各占一半运算。只把 PV 换成 FP16 累加，计算上限就从 251 提高到</p>
+        <div class="eq small">π<sub>new</sub> = 2 / (1/251 + 1/501) = 334 TFLOP/s</div>
+        <p>QK 不能换：logit 的绝对误差会直接变成概率的相对误差（∂P/P = ∂x）。PV 不一样，P ∈ [0, 1]，部分和有界。每个 64-key 块按<strong>本块自己的最大值</strong>取值：</p>
+        <div class="eq small">P̂<sub>j</sub> = 2<sup>−6</sup>·e<sup>x<sub>j</sub> − m<sub>t</sub></sup>&nbsp;&nbsp;⇒&nbsp;&nbsp;Σ P̂<sub>j</sub> ≤ 64·2<sup>−6</sup> = 1&nbsp;&nbsp;⇒&nbsp;&nbsp;‖<b>p</b>‖<sub>∞</sub> ≤ (1+ε)·max‖<b>v</b><sub>j</sub>‖<sub>∞</sub></div>
+        <p>部分和是 V 各行的次凸组合，所以溢出在数学上不可能发生，这个上界与上下文长度和注意力分布都无关。块结束时用一条 FMA 乘 β 折回 FP32 累加器。</p>
+      </div>
+      <div class="panel reveal">
+        <svg class="chart" id="fp16strip" viewBox="0 0 520 300" role="img" aria-label="FP16 正规与次正规区间"></svg>
+        <p class="caption">如果用全局运行最大值，attention sink 会把普通 key 推到 x − m ≈ −10 以下：那里 FP16 只剩次正规数，相对精度约 4%，低于 e<sup>−13.2</sup> 直接变成 0。用块内最大值后，每块最大的一项恰好是 2<sup>−6</sup>，块与块之间的量级差交给 FP32 系数吸收。sink 场景下误差 <b>1.629e-3</b>，而 BF16 舍入本身的下限是 1.628e-3；原内核是 1.634e-3。</p>
+      </div>
+    </div>
+
+    <div class="reveal" style="margin-top:80px">
+      <p class="quote">1.40× = 波次效率 0.753 → 0.899 <em>（×1.19）</em> × 单 SM 吞吐 200 → 232 <em>（×1.16）</em></p>
+    </div>
+  </div>
+</section>
+
+<div class="wrap"><div class="rule"></div></div>
+
+<!-- V RESULTS -->
+<section id="results">
+  <div class="wrap">
+    <div class="sec-h reveal">
+      <div class="num">V</div>
+      <div>
+        <div class="kicker">Results · 结果</div>
+        <h2>从内核到整机</h2>
+        <p class="dek">每个结论都至少经过两层证据：微基准、算子基准（冷 L2、CUDA Graph）、引擎内 nsys 轨迹、整机新旧二进制交替 A/B。</p>
+      </div>
+    </div>
+    <div class="tscroll reveal">
+      <table class="ledger" id="ledger">
+        <thead><tr><th>场景</th><th>改前 → 改后</th><th class="barc"></th><th style="text-align:right">提速</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div class="grid2" style="margin-top:88px">
+      <div class="reveal">
+        <h4>功耗墙</h4>
+        <h3>整机为什么拿不到内核的全部收益</h3>
+        <p>64k prefill 期间，整卡一直顶在 600 W 的功耗墙上（降频原因是 <span class="mono">SW power cap</span>）。新内核让张量核心更忙，开关活动因子 α 变大，同样的功耗只能换到更低的频率。</p>
+        <div class="eq">1.40 × 2595 / 2745 = <span class="gold">1.32</span><span class="c">与引擎内实测的注意力提速一致</span></div>
+        <p>没有改动的内核慢了 3.2%，小于 5.5% 的频率降幅，因为其中一部分受访存限制。每次 64k prefill 的能量从 6.76 kJ 降到 6.17 kJ（<strong>−9%</strong>）：在功耗墙下，真正该看的是每焦耳完成的工作。</p>
+      </div>
+      <div class="panel reveal"><svg class="chart" id="clock" viewBox="0 0 560 300" role="img" aria-label="64k prefill 期间的 SM 频率"></svg></div>
+    </div>
+  </div>
+</section>
+
+<div class="wrap"><div class="rule"></div></div>
+
+<!-- VI VERSUS -->
+<section id="versus">
+  <div class="wrap">
+    <div class="sec-h reveal">
+      <div class="num">VI</div>
+      <div>
+        <div class="kicker">Versus · 同条件对比</div>
+        <h2>与 vLLM、SGLang 同台</h2>
+        <p class="dek">同一块卡、同一份权重，四个引擎都通过 HTTP Chat Completions 接收完全相同的请求。时间是客户端墙钟，包含模板渲染、分词和 HTTP 开销，也就是 agent 客户端实际等待的时间。</p>
+      </div>
+    </div>
+    <div class="chips reveal">
+      <span>Qwen3.8-27B NVFP4</span><span>BF16 KV</span><span>单请求</span><span>无投机解码</span><span>前缀缓存开启</span><span>thinking 关闭 · 温度 0</span><span>142,336 上下文</span>
+    </div>
+    <div class="panel reveal">
+      <div class="seg" id="vseg" role="group" aria-label="测试项"></div>
+      <svg class="chart" id="versussvg" viewBox="0 0 1060 360" role="img" aria-label="引擎对比"></svg>
+      <div class="legend" id="vlegend"></div>
+    </div>
+
+    <div class="cards reveal" style="margin-top:56px" id="vcards"></div>
+
+    <div class="tscroll reveal" style="margin-top:56px">
+      <table class="data" id="vtable"></table>
+    </div>
+    <div class="note reveal" id="vnote"></div>
+  </div>
+</section>
+
+<div class="wrap"><div class="rule"></div></div>
+
+<!-- VII RIGOR -->
+<section id="rigor">
+  <div class="wrap">
+    <div class="sec-h reveal">
+      <div class="num">VII</div>
+      <div>
+        <div class="kicker">Rigor · 验证</div>
+        <h2>快，而且对</h2>
+        <p class="dek">能逐位一致的改动要求逐位一致；不能逐位一致的，以 FP64 oracle 和专门的数值压力测试为准。</p>
+      </div>
+    </div>
+    <div class="verify reveal">
+      <div><b>611</b><h5>FP64 oracle 用例</h5><p>新增 4 个会触发 split 的用例；相对 L2 误差平均只增加 1.5%，离判据上限最多 62%。</p></div>
+      <div><b>5<small>× S</small></b><h5>数值压力测试</h5><p>64k 上下文，测了均匀、尖峰、attention sink、V 离群值、sink 加离群值五种分布，误差都贴着 BF16 舍入的下限，没有非有限值。</p></div>
+      <div><b>48<small>/ 0</small></b><h5>compute-sanitizer</h5><p>memcheck、racecheck、synccheck、initcheck 四个工具共 48 次运行，0 错误，0 冲突。</p></div>
+      <div><b>3042</b><h5>全二进制 SASS 对比</h5><p>只有 18 个 prompt 注意力实例和 112 个 BF16 decode 实例变了，其余 2912 个函数逐条相同。</p></div>
+      <div><b>0<small>ulp</small></b><h5>逐位一致</h5><p>NVFP4 GEMV 和 decode K/V 分段载入都没有改变累加顺序，在真实权重上与改前输出逐位相同。</p></div>
+      <div><b>±0.7<small>%</small></b><h5>模型先于实测</h5><p>波次模型、簇代价模型和功耗折算都是先给出预测再去测量，几十个测量点与预测的偏差都在 1–3% 以内。</p></div>
+    </div>
+  </div>
+</section>
+
+<div class="wrap"><div class="rule"></div></div>
+
+<!-- VIII DOCS -->
+<section id="docs">
+  <div class="wrap">
+    <div class="sec-h reveal">
+      <div class="num">VIII</div>
+      <div>
+        <div class="kicker">Documents · 文档</div>
+        <h2>报告、代码与全部原始数据</h2>
+        <p class="dek">所有数字都附有原始数据和复现脚本。</p>
+      </div>
+    </div>
+    <div class="docs reveal">
+      <a href="https://github.com/haokun12x/wavefill/blob/main/docs/wavefill/technical-report.zh-CN.md"><span class="k">Report · 中文</span><span class="t">技术报告</span><span class="d">从体系结构、roofline、波次量化、在线 softmax 的代数结构讲到 FP16 数值分析和功耗墙，共 12 节。</span><span class="arrow">→</span></a>
+      <a href="https://github.com/haokun12x/wavefill/blob/main/docs/wavefill/engine-comparison.zh-CN.md"><span class="k">Report · 中文</span><span class="t">同条件对比报告</span><span class="d">与 vLLM 0.27.1、SGLang 0.5.17 和上游 NInfer 的同条件对比，包括方法、模型拟合和局限性。</span><span class="arrow">→</span></a>
+      <a href="https://github.com/haokun12x/wavefill/blob/main/docs/wavefill/long-context-attention.md"><span class="k">Design · EN</span><span class="t">Long-context attention</span><span class="d">cluster split-KV 与 FP16 P·V 的设计细节、代价函数和数值验证。</span><span class="arrow">→</span></a>
+      <a href="https://github.com/haokun12x/wavefill/blob/main/docs/wavefill/nvfp4-down-gemv.md"><span class="k">Design · EN</span><span class="t">NVFP4 down-proj GEMV</span><span class="d">冷取指诊断：为什么“带宽 83%”其实是指令缓存问题。</span><span class="arrow">→</span></a>
+      <a href="https://github.com/haokun12x/wavefill/tree/main/docs/wavefill/results"><span class="k">Data</span><span class="t">原始数据</span><span class="d">峰值、带宽上限、簇驻留、算子级与整机 A/B、功耗采样、数值压力测试、sanitizer、SASS 对比、引擎对比。</span><span class="arrow">→</span></a>
+      <a href="https://github.com/haokun12x/wavefill/tree/main/tools/wavefill"><span class="k">Tools</span><span class="t">复现工具</span><span class="d">微基准、数值压力测试、agent 多轮基准和引擎对比脚本。</span><span class="arrow">→</span></a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div>Wavefill · <a href="https://github.com/haokun12x/wavefill">github.com/haokun12x/wavefill</a> · Apache-2.0</div>
+    <div>基于 <a href="https://github.com/Neroued/ninfer">NInfer</a> 的分支，非上游项目的官方作品 · 开发过程借助 Claude Code</div>
+  </div>
+</footer>
+
+<script>
+/* same-workload comparison, medians (docs/wavefill/results/engine-compare) */
+window.WAVEFILL_VERSUS = {
+  groups: [
+    { label: "冷启动", axis: "到首 token 时间（秒，越短越好）", max: 40, fmt: (v, b) => b ? v.toFixed(2) + " s" : v.toFixed(0),
+      rows: [ { label: "32k prompt", v: [3.97, 4.38, 4.29, 4.16] },
+              { label: "64k prompt", v: [10.00, 11.47, 11.01, 10.56] },
+              { label: "128k prompt", v: [28.52, 34.25, 31.66, null], na: "SGLang：KV 池仅 85k，被拒绝" } ] },
+    { label: "agent 单轮", axis: "64k 历史上追加 d 个 token，到首 token（毫秒，越短越好）", max: 1600, fmt: (v, b) => b ? v.toFixed(0) + " ms" : v.toFixed(0),
+      rows: [ { label: "+128 token", v: [162, 192, 221, 338] },
+              { label: "+512 token", v: [230, 272, 418, 453] },
+              { label: "+4096 token", v: [1071, 1271, 1401, 1338] } ] },
+    { label: "decode", axis: "单请求 decode（tok/s，越高越好）· 带宽下界 88 tok/s", max: 100, fmt: (v, b) => b ? v.toFixed(1) + " tok/s" : v.toFixed(0),
+      rows: [ { label: "512 token", v: [77.6, 76.9, 56.5, 41.3] } ] }
+  ],
+  cards: [
+    { k: "冷启动", t: "线性部分几乎一样，差距在注意力",
+      d: "用 t(N) = aN + bN² 拟合每个引擎的三个点，误差都在 1% 以内。线性系数 a 只在 87.8–94.2 µs/token 之间，注意力有效吞吐 196608/b 却分别是 <strong>199</strong>（Wavefill）、150（NInfer）、175（vLLM）、189（SGLang）TFLOP/s。NInfer 的 150 与单独测内核得到的 151 一致。" },
+    { k: "agent 单轮", t: "复用粒度与注意力，各占一半",
+      d: "NInfer/Wavefill 在每轮结束处保存精确的检查点，每轮只重算 d + 15 个 token。vLLM 对混合模型只能按 784 token 的整块复用，平均每轮多算约 390 个 token；“整块复用”模型以 <strong>r = 0.998</strong> 解释了它的延迟波动。Wavefill 每多 prefill 一个 token 的边际代价最低，231 µs，比 NInfer 低 17%。" },
+    { k: "decode", t: "同样的字节，不同的带宽利用率",
+      d: "四个引擎每个 token 都要读 19.35 GB，带宽下界 11.4 ms。Wavefill 达到下界的 <strong>88%</strong>，NInfer 88%，vLLM 64%，SGLang 47%。Wavefill 跑在最低的频率上（2640 MHz，600 W 功耗墙），每一项仍然最快。" }
+  ],
+  table: {
+    head: ["Wavefill", "NInfer 9e163eee", "vLLM 0.27.1", "SGLang 0.5.17"],
+    rows: [
+      ["冷启动 32k / 64k / 128k", "3.97 / 10.00 / 28.5 s", "4.38 / 11.47 / 34.3 s", "4.29 / 11.01 / 31.7 s", "4.16 / 10.56 s / —"],
+      ["agent 单轮 +128 / +512 / +4096", "162 / 230 / 1071 ms", "192 / 272 / 1271 ms", "221 / 418 / 1401 ms", "338 / 453 / 1338 ms"],
+      ["decode", "77.6 tok/s", "76.9 tok/s", "56.5 tok/s", "41.3 tok/s"],
+      ["注意力有效吞吐（拟合）", "199 TFLOP/s", "150", "175", "189"],
+      ["每轮重算粒度", "d + 15", "d + 15", "784 token 整块", "64 token"],
+      ["SM 频率 / 功耗中位数", "2640 MHz / 600 W", "2745 / 577", "2752 / 599", "2677 / 599"]
+    ]
+  },
+  note: `<p><strong>设置。</strong>vLLM 显式使用 BF16 KV（FlashAttention 2）。它的默认 <span class="mono">--kv-cache-dtype auto</span> 会按 checkpoint 选 FP8 KV（FlashInfer），那样反而更慢：冷启动 4.55 / 12.01 / 36.0 s。vLLM 的 FlashInfer FP4 自动调优在 32 GB 显存上会 OOM，所以关闭了。SGLang 的 <span class="mono">mem-fraction-static</span> 设为 0.94，0.97 会 OOM。</p>
+<p><strong>局限。</strong>只测了单请求。多请求并发吞吐是 vLLM 和 SGLang 的设计重点，这次没有涉及。冷启动每点测 2 次，单轮每格 3 轮；同一引擎重复测量之间的差异在 1% 以内。完整的方法、模型拟合和讨论见<a class="gold" href="https://github.com/haokun12x/wavefill/blob/main/docs/wavefill/engine-comparison.zh-CN.md">同条件对比报告</a>。</p>`
+};
+</script>
+<script>
+(() => {
+"use strict";
+const NS = "http://www.w3.org/2000/svg";
+const css = getComputedStyle(document.documentElement);
+const C = k => css.getPropertyValue(k).trim();
+const GOLD = C("--gold"), GOLD2 = C("--gold2"), GOLDD = C("--golddim"), IV = C("--ivory"),
+      MUT = C("--muted"), FAINT = C("--faint"), LINE = "rgba(236,230,218,.09)", LINE2 = "rgba(236,230,218,.18)",
+      ST = C("--steel"), ST2 = C("--steel2"), ST3 = C("--steel3");
+const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+function el(tag, attrs = {}, parent) {
+  const e = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "text") e.textContent = v; else e.setAttribute(k, v);
+  }
+  if (parent) parent.appendChild(e);
+  return e;
+}
+function clear(s) { while (s.firstChild) s.removeChild(s.firstChild); }
+function txt(p, x, y, s, o = {}) {
+  return el("text", Object.assign({ x, y, "font-size": o.size || 12, fill: o.fill || MUT,
+    "text-anchor": o.anchor || "start", class: o.mono ? "m" : "", "font-weight": o.weight || 400,
+    "dominant-baseline": o.base || "auto", text: s }, o.attrs || {}), p);
+}
+function seg(container, items, onPick, initial) {
+  const host = document.getElementById(container);
+  const btns = items.map((it, i) => {
+    const b = document.createElement("button");
+    b.type = "button"; b.textContent = it.label;
+    b.addEventListener("click", () => { btns.forEach(x => x.classList.remove("on")); b.classList.add("on"); onPick(it, i); });
+    host.appendChild(b); return b;
+  });
+  btns[initial || 0].click();
+}
+
+/* ---------- nav + reveal + counters ---------- */
+const nav = document.getElementById("nav");
+const onScroll = () => nav.classList.toggle("scrolled", scrollY > 40);
+addEventListener("scroll", onScroll, { passive: true }); onScroll();
+const io = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); } }), { rootMargin: "0px 0px -8% 0px" });
+document.querySelectorAll(".reveal").forEach(n => io.observe(n));
+if (!reduce) document.querySelectorAll("[data-count]").forEach(b => {
+  const end = parseFloat(b.dataset.count), dec = +b.dataset.dec, unit = b.querySelector("small").outerHTML;
+  const t0 = performance.now() + 500, dur = 1800;
+  const step = now => {
+    const k = Math.min(1, Math.max(0, (now - t0) / dur)), e = 1 - Math.pow(1 - k, 4);
+    b.innerHTML = (end * e).toFixed(dec) + unit;
+    if (k < 1) requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+});
+
+/* ---------- hero chip: waves of tiles over 170 SMs ---------- */
+(function hero() {
+  const cv = document.getElementById("chip"), cx = cv.getContext("2d");
+  // 12 GPC slots (2 x 6); 16 = full, 14 = two SMs fused off, 0 = whole GPC fused off
+  const layout = [16, 16, 14, 16, 16, 16, 16, 14, 16, 16, 14, 0];
+  let W, H, cells = [], dpr = 1, visible = true;
+  function build() {
+    dpr = Math.min(2, devicePixelRatio || 1);
+    W = cv.clientWidth; H = cv.clientHeight;
+    cv.width = W * dpr; cv.height = H * dpr; cx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const mobile = W < 900;
+    const dieW = mobile ? W * 1.05 : Math.min(W * 0.4, 620), dieH = dieW * 0.62;
+    const ox = mobile ? (W - dieW) / 2 : W - dieW - Math.max(48, W * 0.06), oy = mobile ? H * 0.1 : (H - dieH) / 2 - H * 0.07;
+    cv.style.opacity = mobile ? 0.32 : 0.95;
+    const gw = dieW / 6, gh = (dieH - dieH * 0.14) / 2, pad = gw * 0.12;
+    cells = []; const gpcs = [];
+    layout.forEach((n, g) => {
+      const col = g % 6, row = (g / 6) | 0;
+      const gx = ox + col * gw, gy = oy + row * (gh + dieH * 0.14);
+      gpcs.push({ x: gx + pad * 0.4, y: gy + pad * 0.4, w: gw - pad * 0.8, h: gh - pad * 0.8, n });
+      const cw = (gw - pad * 2) / 4;
+      for (let i = 0; i < 16; i++) {
+        const x = gx + pad + (i % 4) * cw, y = gy + pad + ((i / 4) | 0) * ((gh - pad * 2) / 4);
+        const alive = i < n;
+        cells.push({ x, y, s: cw * 0.78, sy: (gh - pad * 2) / 4 * 0.78, alive, j: Math.random() });
+      }
+    });
+    build.gpcs = gpcs; build.die = { ox, oy, dieW, dieH };
+  }
+  const alive = () => cells.filter(c => c.alive);
+  // timeline: before = 3 waves (170,170,44) of 1 unit; after = 5 waves (170x4, 88) of 0.5 unit
+  const plans = [
+    { name: "NInfer · 1024-token chunk · 384 tiles · 1 CTA / SM", waves: [170, 170, 44], unit: 1.0, col: [141, 147, 155] },
+    { name: "Wavefill · cluster split-KV S=2 · 768 CTAs", waves: [170, 170, 170, 170, 88], unit: 0.5, col: [201, 169, 110] }
+  ];
+  const UNIT = 1.6; // seconds per full-length wave
+  const PAUSE = 1.6;
+  const lens = plans.map(p => p.waves.length * p.unit * UNIT + PAUSE);
+  const cycle = lens[0] + lens[1];
+  let order = [];
+  function shuffleOrder() {
+    const a = alive().map((c, i) => i);
+    for (let i = a.length - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [a[i], a[j]] = [a[j], a[i]]; }
+    order = a;
+  }
+  function draw(t) {
+    cx.clearRect(0, 0, W, H);
+    const d = build.die;
+    // die outline + L2 band
+    cx.strokeStyle = "rgba(236,230,218,.07)"; cx.lineWidth = 1;
+    rr(d.ox - 18, d.oy - 18, d.dieW + 36, d.dieH + 36, 10); cx.stroke();
+    cx.fillStyle = "rgba(201,169,110,.035)";
+    const l2y = d.oy + (d.dieH - d.dieH * 0.14) / 2 + d.dieH * 0.025;
+    cx.fillRect(d.ox + 6, l2y, d.dieW - 12, d.dieH * 0.09);
+    cx.fillStyle = "rgba(236,230,218,.22)"; cx.font = `400 ${Math.max(9, d.dieW * 0.014)}px "JetBrains Mono", monospace`;
+    cx.textAlign = "center"; cx.textBaseline = "middle";
+    cx.fillText("L2 · 96 MB", d.ox + d.dieW / 2, l2y + d.dieH * 0.045);
+    build.gpcs.forEach(g => { cx.strokeStyle = g.n ? "rgba(236,230,218,.08)" : "rgba(236,230,218,.04)"; rr(g.x, g.y, g.w, g.h, 4); cx.stroke(); });
+    // phase
+    let tt = t % cycle, p = 0;
+    if (tt > lens[0]) { tt -= lens[0]; p = 1; }
+    const plan = plans[p];
+    const waveDur = plan.unit * UNIT;
+    const w = Math.floor(tt / waveDur), within = (tt % waveDur) / waveDur;
+    const busy = w < plan.waves.length ? plan.waves[w] : 0;
+    const al = alive();
+    let k = 0;
+    cells.forEach(c => {
+      if (!c.alive) {
+        cx.strokeStyle = "rgba(236,230,218,.035)"; rr(c.x, c.y, c.s, c.sy, 2); cx.stroke();
+        cx.beginPath(); cx.moveTo(c.x + 2, c.y + 2); cx.lineTo(c.x + c.s - 2, c.y + c.sy - 2); cx.stroke();
+        return;
+      }
+      const idx = al.indexOf(c);
+      const rank = order.indexOf(idx);
+      let a = 0;
+      if (w < plan.waves.length && rank < busy) {
+        const rise = Math.min(1, within * 7 + c.j * 0.2), fall = within > 0.86 ? (1 - within) / 0.14 : 1;
+        a = Math.max(0, Math.min(rise, fall));
+      }
+      cx.fillStyle = "rgba(236,230,218,.035)"; rr(c.x, c.y, c.s, c.sy, 2); cx.fill();
+      if (a > 0) {
+        const [r, g, b] = plan.col;
+        cx.fillStyle = `rgba(${r},${g},${b},${(p ? 0.16 : 0.1) + (p ? 0.6 : 0.4) * a})`; rr(c.x, c.y, c.s, c.sy, 2); cx.fill();
+      }
+      k++;
+    });
+    // caption
+    if (W < 900) return;
+    const fs = Math.max(10, Math.min(12.5, d.dieW * 0.017));
+    cx.font = `400 ${fs}px "JetBrains Mono", monospace`; cx.textAlign = "left"; cx.textBaseline = "alphabetic";
+    cx.fillStyle = p ? "rgba(230,204,150,.85)" : "rgba(170,175,182,.8)";
+    cx.fillText(plan.name, d.ox - 18, d.oy - 34);
+    const used = plan.waves.slice(0, Math.min(w + 1, plan.waves.length));
+    const elapsed = Math.min(plan.waves.length, w + within) * plan.unit;
+    const info = w < plan.waves.length
+      ? `wave ${w + 1}/${plan.waves.length} · ${busy}/170 SM busy · t = ${elapsed.toFixed(2)}`
+      : `done · ${(plan.waves.length * plan.unit).toFixed(1)} wave-times · fill ${(plan.waves.reduce((a, b) => a + b, 0) / (plan.waves.length * 170) * 100).toFixed(1)}%`;
+    cx.fillStyle = "rgba(236,230,218,.4)";
+    cx.fillText(info, d.ox - 18, d.oy + d.dieH + 44);
+  }
+  function rr(x, y, w, h, r) { cx.beginPath(); cx.moveTo(x + r, y); cx.arcTo(x + w, y, x + w, y + h, r); cx.arcTo(x + w, y + h, x, y + h, r); cx.arcTo(x, y + h, x, y, r); cx.arcTo(x, y, x + w, y, r); cx.closePath(); }
+  build(); shuffleOrder();
+  addEventListener("resize", () => { build(); if (reduce) draw(UNIT * 2.5); });
+  new IntersectionObserver(es => { visible = es[0].isIntersecting; }).observe(cv);
+  if (reduce) { draw(UNIT * 2.5); return; }
+  const t0 = performance.now(); let lastCycle = 0;
+  (function loop(now) {
+    const t = (now - t0) / 1000;
+    const cyc = Math.floor(t / cycle);
+    if (cyc !== lastCycle) { lastCycle = cyc; shuffleOrder(); }
+    if (visible) draw(t);
+    requestAnimationFrame(loop);
+  })(t0);
+})();
+
+/* ---------- film chapters ---------- */
+(function chapters() {
+  const list = [["0:00", "开场"], ["0:09", "来龙去脉"], ["0:28", "认识芯片"], ["0:52", "带宽上限"], ["1:14", "Roofline"],
+    ["1:34", "decode 已到顶"], ["2:05", "prefill 的二次项"], ["2:22", "内核内部"], ["2:44", "波次量化"], ["3:14", "cluster split-KV"],
+    ["3:54", "FP16 累加 P·V"], ["4:30", "结果"], ["4:59", "功耗墙"], ["5:21", "验证"], ["5:34", "结尾"]];
+  const host = document.getElementById("chapters"), v = document.getElementById("video");
+  const secs = list.map(([t]) => { const [m, s] = t.split(":"); return +m * 60 + +s; });
+  const btns = list.map(([t, n], i) => {
+    const b = document.createElement("button"); b.type = "button";
+    b.innerHTML = `<span class="t">${t}</span><span class="n">${n}</span>`;
+    b.addEventListener("click", () => { v.currentTime = secs[i]; v.play().catch(() => {}); });
+    host.appendChild(b); return b;
+  });
+  v.addEventListener("timeupdate", () => {
+    let k = 0; secs.forEach((s, i) => { if (v.currentTime >= s) k = i; });
+    btns.forEach((b, i) => b.classList.toggle("on", i === k && v.currentTime > 0));
+  });
+})();
+
+/* ---------- roofline ---------- */
+(function roofline() {
+  const s = document.getElementById("roofline");
+  const L = 58, R = 540, T = 22, B = 380;
+  const x = I => L + (Math.log10(I) - Math.log10(0.5)) / (Math.log10(30000) - Math.log10(0.5)) * (R - L);
+  const y = P => B - (Math.log10(P) - Math.log10(1)) / (Math.log10(900) - Math.log10(1)) * (B - T);
+  [1, 10, 100, 1000].forEach(v => { el("line", { x1: L, x2: R, y1: y(v), y2: y(v), stroke: LINE }, s); txt(s, L - 10, y(v) + 4, v, { anchor: "end", mono: 1, size: 10.5 }); });
+  [1, 10, 100, 1000, 10000].forEach(v => { el("line", { x1: x(v), x2: x(v), y1: T, y2: B, stroke: LINE }, s); txt(s, x(v), B + 18, v >= 1000 ? v / 1000 + "k" : v, { anchor: "middle", mono: 1, size: 10.5 }); });
+  txt(s, (L + R) / 2, B + 40, "算术强度 I（FLOP / 字节）", { anchor: "middle", size: 11.5 });
+  txt(s, 16, (T + B) / 2, "TFLOP/s", { anchor: "middle", size: 11.5, attrs: { transform: `rotate(-90 16 ${(T + B) / 2})` } });
+  const bw = 1.70;
+  const roofs = [[251, ST, "FP32 累加 251"], [334, GOLD, "Wavefill 混合累加 334"], [501, ST2, "FP16 累加 501"]];
+  el("path", { d: `M${x(0.5)},${y(0.5 * bw)} L${x(501 / bw)},${y(501)}`, stroke: IV, "stroke-opacity": .55, "stroke-width": 1.2, fill: "none" }, s);
+  txt(s, x(3.2), y(3.2 * bw) - 16, "1.70 TB/s", { mono: 1, size: 10.5, fill: IV, attrs: { transform: `rotate(-32.5 ${x(3.2)} ${y(3.2 * bw) - 16})` } });
+  roofs.forEach(([p, c, n], i) => {
+    el("line", { x1: x(p / bw), x2: R, y1: y(p), y2: y(p), stroke: c, "stroke-width": i === 1 ? 1.4 : 1, "stroke-dasharray": i === 1 ? "5 4" : "" }, s);
+    txt(s, x(p / bw) + 8, i === 0 ? y(p) + 15 : y(p) - 6, n, { size: 10.5, fill: c, mono: 1 });
+  });
+  const pts = [
+    { I: 2, P: 2 * bw * 0.9, c: ST, l: "decode · FP8 权重", dy: 26 },
+    { I: 3.6, P: 3.6 * bw * 0.9, c: ST, l: "decode · NVFP4", dy: -14 },
+    { I: 6144, P: 151, c: ST, l: "prefill 注意力 · 改前 151", dy: 22, anchor: "end" },
+    { I: 6144, P: 212, c: GOLD2, l: "改后 212", dy: -12, anchor: "end" }
+  ];
+  el("line", { x1: x(6144), x2: x(6144), y1: y(151), y2: y(212), stroke: GOLD, "stroke-width": 1, "stroke-dasharray": "2 3" }, s);
+  pts.forEach(p => {
+    el("circle", { cx: x(p.I), cy: y(p.P), r: 4.5, fill: p.c, stroke: "#0a0a0b", "stroke-width": 1.5 }, s);
+    txt(s, x(p.I) + (p.anchor ? -10 : 9), y(p.P) + p.dy * 0.5 + 3, p.l, { size: 11, fill: p.c === ST ? MUT : GOLD2, anchor: p.anchor || "start" });
+  });
+})();
+
+/* ---------- decode gap ---------- */
+(function decodegap() {
+  const s = document.getElementById("decodegap");
+  const L = 20, R = 540, total = 13.1, sc = (R - L) / total;
+  const parts = [[11.39, "带宽下界 11.4 ms", ST3, IV], [1.09, "权重内核 1.09", GOLDD, GOLD2], [0.44, "小内核 0.44", "#a08655", GOLD2], [0.18, "间隙 0.18", GOLD, GOLD2]];
+  let xx = L;
+  txt(s, L, 30, "一个 decode token · 641 个内核 · 13.1 ms", { size: 12, fill: IV });
+  parts.forEach(([v, n, c, tc], i) => {
+    el("rect", { x: xx, y: 50, width: v * sc - 1, height: 40, fill: c }, s);
+    if (i === 0) txt(s, xx + 14, 75, n, { size: 12, fill: IV });
+    else {
+      const lx = xx + v * sc / 2, ly = 118 + (i - 1) * 24;
+      el("line", { x1: lx, x2: lx, y1: 92, y2: ly - 12, stroke: LINE2 }, s);
+      txt(s, lx, ly, n, { size: 11.5, fill: tc, anchor: i === 3 ? "end" : "middle", mono: 0 });
+    }
+    xx += v * sc;
+  });
+  txt(s, L, 210, "已达下界的 87%", { size: 30, fill: IV, attrs: { style: "font-family:'Bodoni Moda',serif;font-weight:400" } });
+  txt(s, L, 236, "GPU 忙碌率 98.6% · 内核间隙合计 183 µs · 宿主侧无气泡", { size: 11.5 });
+})();
+
+/* ---------- GPC explorer ---------- */
+(function gpc() {
+  const s = document.getElementById("gpc");
+  const layout = [16, 16, 14, 16, 16, 16, 16, 14, 16, 16, 14, 0];
+  const gw = 96, gh = 140, gap = 4, ox = 6, oy = 10;
+  const shades = [GOLD, "#a88a55", GOLD2, "#8f7647"];
+  function draw(S) {
+    clear(s);
+    let clusters = 0, used = 0;
+    layout.forEach((n, g) => {
+      const col = g % 6, row = (g / 6) | 0;
+      const gx = ox + col * (gw + gap), gy = oy + row * (gh + 26);
+      el("rect", { x: gx, y: gy, width: gw, height: gh, fill: "none", stroke: n ? LINE2 : LINE, rx: 4 }, s);
+      txt(s, gx + 8, gy + 16, n ? `GPC · ${n}` : "已屏蔽", { size: 10, mono: 1, fill: n ? FAINT : "#3a3835" });
+      const k = n ? Math.floor(n / S) : 0; clusters += k; used += k * S;
+      for (let i = 0; i < 16; i++) {
+        const cxp = gx + 10 + (i % 4) * 20, cyp = gy + 28 + ((i / 4) | 0) * 27;
+        if (i >= n) {
+          el("rect", { x: cxp, y: cyp, width: 16, height: 22, fill: "none", stroke: "rgba(236,230,218,.05)", rx: 2 }, s);
+          el("line", { x1: cxp + 3, y1: cyp + 3, x2: cxp + 13, y2: cyp + 19, stroke: "rgba(236,230,218,.06)" }, s);
+          continue;
+        }
+        const ci = Math.floor(i / S), inC = ci < k;
+        el("rect", { x: cxp, y: cyp, width: 16, height: 22, rx: 2,
+          fill: inC ? shades[ci % shades.length] : "rgba(236,230,218,.04)",
+          "fill-opacity": inC ? 0.82 : 1, stroke: inC ? "none" : "rgba(236,230,218,.14)", "stroke-dasharray": inC ? "" : "2 2" }, s);
+      }
+    });
+    txt(s, 300, 343, `C(S) = 8·⌊16/${S}⌋ + 3·⌊14/${S}⌋ = ${clusters} 个簇`, { anchor: "middle", mono: 1, size: 13, fill: GOLD2 });
+    document.getElementById("st-c").textContent = clusters;
+    document.getElementById("st-u").textContent = used;
+    document.getElementById("st-w").textContent = 170 - used;
+  }
+  seg("sseg", [1, 2, 3, 4, 5, 6, 7, 8].map(v => ({ label: (v === 1 ? "S = " : "") + v, v })), it => draw(it.v), 1);
+})();
+
+/* ---------- wave explorer ---------- */
+(function waves() {
+  const s = document.getElementById("wavesvg");
+  const CS = { 1: 170, 2: 85, 3: 52, 4: 41, 5: 30, 6: 22, 7: 22, 8: 19 };
+  const rows = [
+    { T: 128, S: 3, b: 56.8, a: 194.1 }, { T: 256, S: 3, b: 113.2, a: 194.3 }, { T: 512, S: 4, b: 113.5, a: 207.0 },
+    { T: 1024, S: 2, b: 151.4, a: 208.9 }, { T: 2048, S: 4, b: 179.6, a: 215.7 }, { T: 4096, S: 2, b: 180.8, a: 218.3 }];
+  const PW = 360, PH = 250, X0 = 20, X1 = 430, Y0 = 46;
+  function panel(x0, title, sub, waveList, unit, color) {
+    txt(s, x0, 22, title, { size: 13, fill: IV });
+    txt(s, x0 + PW, 22, sub, { size: 11, fill: MUT, anchor: "end", mono: 1 });
+    el("rect", { x: x0, y: Y0, width: PW, height: PH, fill: "none", stroke: LINE }, s);
+    let yy = Y0;
+    const h = unit;
+    waveList.forEach(n => {
+      const hh = Math.max(1.2, h - (h > 6 ? 2 : 0.6));
+      el("rect", { x: x0, y: yy, width: PW * n / 170, height: hh, fill: color, "fill-opacity": .85 }, s);
+      if (n < 170) el("rect", { x: x0 + PW * n / 170, y: yy, width: PW * (170 - n) / 170, height: hh, fill: "url(#hatch)" }, s);
+      yy += h;
+    });
+    return yy;
+  }
+  function draw(r) {
+    clear(s);
+    const defs = el("defs", {}, s);
+    const pat = el("pattern", { id: "hatch", width: 6, height: 6, patternUnits: "userSpaceOnUse", patternTransform: "rotate(45)" }, defs);
+    el("line", { x1: 0, y1: 0, x2: 0, y2: 6, stroke: "rgba(236,230,218,.11)", "stroke-width": 1.2 }, pat);
+    const U = Math.ceil(r.T / 64) * 24, wb = Math.ceil(U / 170);
+    const before = Array.from({ length: wb }, (_, i) => Math.min(170, U - 170 * i));
+    const C_S = CS[r.S], wa = Math.ceil(U / C_S);
+    const after = Array.from({ length: wa }, (_, i) => Math.min(C_S, U - C_S * i) * r.S);
+    const unit = PH / wb;
+    const eb = U / (170 * wb), ea = U * r.S / (170 * wa);
+    const yb = panel(X0, "原内核", `U = ${U} tiles · ${wb} 波 · η = ${(eb * 100).toFixed(1)}%`, before, unit, ST2);
+    const ya = panel(X1 - 0, "Wavefill", `S = ${r.S} · ${wa} 波 × 1/${r.S} · 占用 ${(ea * 100).toFixed(1)}%`, after, unit / r.S, GOLD);
+    // time markers
+    el("line", { x1: X1, x2: X1 + PW, y1: ya, y2: ya, stroke: GOLD, "stroke-dasharray": "3 3" }, s);
+    txt(s, X1 + PW - 6, Math.min(ya + 16, Y0 + PH - 6), `≈ ${(wa / r.S).toFixed(2)} 个波次时长`, { size: 11, fill: GOLD2, mono: 1, anchor: "end" });
+    el("line", { x1: X0, x2: X0 + PW, y1: yb, y2: yb, stroke: ST, "stroke-dasharray": "3 3" }, s);
+    txt(s, X0 + PW - 6, yb - 8, `${wb} 个波次时长`, { size: 11, fill: ST, mono: 1, anchor: "end" });
+    txt(s, X0, Y0 + PH + 22, "← 170 个 SM →　时间 ↓", { size: 10.5, fill: FAINT, mono: 1 });
+    // throughput bars
+    const bx = 850, bw = 190, by = Y0;
+    txt(s, bx, 22, "实测 TFLOP/s · 64k", { size: 11, fill: MUT, mono: 1 });
+    const sc = bw / 251;
+    [[r.b, ST2, "原内核"], [r.a, GOLD, "Wavefill"]].forEach(([v, c, n], i) => {
+      const y = by + 26 + i * 70;
+      txt(s, bx, y - 8, n, { size: 11.5, fill: i ? GOLD2 : MUT });
+      el("rect", { x: bx, y, width: bw, height: 14, fill: "rgba(236,230,218,.04)" }, s);
+      el("rect", { x: bx, y, width: v * sc, height: 14, fill: c }, s);
+      txt(s, bx + bw, y + 34, v.toFixed(1), { size: 22, fill: i ? GOLD2 : IV, anchor: "end", attrs: { style: "font-family:'Bodoni Moda',serif;font-weight:400" } });
+    });
+    el("line", { x1: bx + bw, x2: bx + bw, y1: by + 14, y2: by + 170, stroke: LINE2, "stroke-dasharray": "2 3" }, s);
+    txt(s, bx + bw, by + 184, "峰值 251", { size: 10, fill: FAINT, anchor: "end", mono: 1 });
+    txt(s, bx, by + 232, (r.a / r.b).toFixed(2) + "×", { size: 46, fill: GOLD2, attrs: { style: "font-family:'Bodoni Moda',serif;font-weight:400" } });
+  }
+  seg("tseg", rows.map(r => ({ label: `+${r.T} token`, r })), it => draw(it.r), 0);
+})();
+
+/* ---------- R constant ---------- */
+(function rconst() {
+  const s = document.getElementById("rconst");
+  const T = [128, 256, 512, 1024, 2048, 4096];
+  const before = [201.2, 200.5, 201.0, 201.1, 198.8, 200.1], after = [230.5, 231.2, 231.6, 232.3, 229.2, 230.6];
+  const rawB = [56.8, 113.2, 113.5, 151.4, 179.6, 180.8], rawA = [194.1, 194.3, 207.0, 208.9, 215.7, 218.3];
+  const L = 52, R = 540, Tp = 24, B = 286;
+  const x = i => L + 20 + i * (R - L - 40) / 5, y = v => B - v / 260 * (B - Tp);
+  [0, 50, 100, 150, 200, 250].forEach(v => { el("line", { x1: L, x2: R, y1: y(v), y2: y(v), stroke: LINE }, s); txt(s, L - 8, y(v) + 4, v, { anchor: "end", size: 10.5, mono: 1 }); });
+  T.forEach((t, i) => txt(s, x(i), B + 20, "+" + t, { anchor: "middle", size: 10.5, mono: 1 }));
+  el("line", { x1: L, x2: R, y1: y(200), y2: y(200), stroke: ST, "stroke-dasharray": "4 4" }, s);
+  el("line", { x1: L, x2: R, y1: y(230), y2: y(230), stroke: GOLD, "stroke-dasharray": "4 4" }, s);
+  el("line", { x1: L, x2: R, y1: y(251), y2: y(251), stroke: LINE2 }, s);
+  txt(s, L + 6, y(251) - 6, "FP32 累加峰值 251", { size: 10.5, fill: FAINT });
+  const pl = (arr, c, w) => el("polyline", { points: arr.map((v, i) => `${x(i)},${y(v)}`).join(" "), fill: "none", stroke: c, "stroke-width": w, "stroke-opacity": .5 }, s);
+  pl(rawB, ST2, 1); pl(rawA, GOLDD, 1);
+  rawB.forEach((v, i) => el("circle", { cx: x(i), cy: y(v), r: 3, fill: "none", stroke: ST2 }, s));
+  rawA.forEach((v, i) => el("circle", { cx: x(i), cy: y(v), r: 3, fill: "none", stroke: GOLDD }, s));
+  before.forEach((v, i) => el("circle", { cx: x(i), cy: y(v), r: 4.5, fill: ST }, s));
+  after.forEach((v, i) => el("circle", { cx: x(i), cy: y(v), r: 4.5, fill: GOLD2 }, s));
+  const lx = x(3) + 10;
+  [[GOLD2, "fill", "Wavefill：实测 ÷ 有效 η ≈ 230"], [ST, "fill", "原内核：实测 ÷ η ≈ 200"], [MUT, "none", "原始实测 TFLOP/s"]].forEach(([c, f, t], i) => {
+    const yy = y(78) + i * 19;
+    el("circle", { cx: lx, cy: yy - 4, r: 4, fill: f === "fill" ? c : "none", stroke: c }, s);
+    txt(s, lx + 12, yy, t, { size: 11, fill: c });
+  });
+  txt(s, L, B + 40, "追加 token 数（64k 历史）", { size: 11 });
+})();
+
+/* ---------- S prediction ---------- */
+(function spred() {
+  const s = document.getElementById("spred");
+  const pred = [1, .833, .889, .833, .867, 1, .857, .875], meas = [1, .840, .894, .846, .881, 1.019, .879, .904], ms = [10.81, 9.08, 9.66, 9.14, 9.52, 11.02, 9.50, 9.77];
+  const L = 48, R = 540, T = 30, B = 270;
+  const y = v => B - (v - 0.75) / (1.05 - 0.75) * (B - T), bw = (R - L) / 8;
+  [0.8, 0.9, 1.0].forEach(v => { el("line", { x1: L, x2: R, y1: y(v), y2: y(v), stroke: LINE }, s); txt(s, L - 8, y(v) + 4, v.toFixed(1), { anchor: "end", size: 10.5, mono: 1 }); });
+  meas.forEach((m, i) => {
+    const xx = L + i * bw + bw * 0.22, best = i === 1;
+    el("rect", { x: xx, y: y(m), width: bw * 0.56, height: B - y(m), fill: best ? GOLD : ST3, "fill-opacity": best ? .9 : 1 }, s);
+    el("line", { x1: xx - 5, x2: xx + bw * 0.56 + 5, y1: y(pred[i]), y2: y(pred[i]), stroke: best ? IV : GOLD2, "stroke-width": 2 }, s);
+    txt(s, xx + bw * 0.28, B + 18, "S=" + (i + 1), { anchor: "middle", size: 10.5, mono: 1, fill: best ? GOLD2 : MUT });
+    txt(s, xx + bw * 0.28, y(Math.max(m, pred[i])) - 8, ms[i].toFixed(2), { anchor: "middle", size: 9.5, mono: 1, fill: best ? GOLD2 : FAINT });
+  });
+  txt(s, L, 14, "相对 S = 1 的耗时（越低越好）", { size: 11 });
+  el("rect", { x: R - 220, y: 4, width: 12, height: 12, fill: ST3 }, s); txt(s, R - 202, 14, "实测（ms 标在柱顶）", { size: 10.5 });
+  el("line", { x1: R - 90, x2: R - 76, y1: 10, y2: 10, stroke: GOLD2, "stroke-width": 2 }, s); txt(s, R - 70, 14, "模型预测", { size: 10.5 });
+})();
+
+/* ---------- FP16 strip ---------- */
+(function strip() {
+  const s = document.getElementById("fp16strip");
+  const L = 14, R = 506, x = v => L + (-v) / 16 * (R - L);
+  txt(s, L, 20, "x − m（以运行最大值为基准）", { size: 11 });
+  const y0 = 60, h = 34;
+  el("rect", { x: x(0), y: y0, width: x(-5.55) - x(0), height: h, fill: GOLD, "fill-opacity": .42 }, s);
+  el("rect", { x: x(-5.55), y: y0, width: x(-13.17) - x(-5.55), height: h, fill: GOLD, "fill-opacity": .12 }, s);
+  el("rect", { x: x(-13.17), y: y0, width: x(-16) - x(-13.17), height: h, fill: "url(#zero)" }, s);
+  const defs = el("defs", {}, s);
+  const pat = el("pattern", { id: "zero", width: 5, height: 5, patternUnits: "userSpaceOnUse", patternTransform: "rotate(45)" }, defs);
+  el("line", { x1: 0, y1: 0, x2: 0, y2: 5, stroke: "rgba(236,230,218,.14)" }, pat);
+  [0, -4, -8, -12, -16].forEach(v => { el("line", { x1: x(v), x2: x(v), y1: y0 + h, y2: y0 + h + 6, stroke: LINE2 }, s); txt(s, x(v), y0 + h + 20, v, { anchor: "middle", size: 10.5, mono: 1 }); });
+  txt(s, (x(0) + x(-5.55)) / 2, y0 + 22, "FP16 正规数", { anchor: "middle", size: 12, fill: IV });
+  txt(s, (x(-5.55) + x(-13.17)) / 2, y0 + 22, "次正规：精度递减", { anchor: "middle", size: 11.5, fill: IV });
+  txt(s, (x(-13.17) + x(-16)) / 2, y0 + 22, "→ 0", { anchor: "middle", size: 11.5, fill: MUT, mono: 1 });
+  txt(s, x(-5.55), y0 - 8, "−5.55 = −8 ln 2", { anchor: "middle", size: 10, mono: 1, fill: GOLD2 });
+  txt(s, x(-13.17), y0 - 8, "−13.2", { anchor: "middle", size: 10, mono: 1, fill: MUT });
+  // global max scenario
+  const g = 160;
+  txt(s, L, g, "全局最大值 + attention sink", { size: 12, fill: IV });
+  el("circle", { cx: x(0), cy: g + 26, r: 5, fill: "#d98b6a" }, s); txt(s, x(0) + 10, g + 30, "sink", { size: 10.5, fill: "#d98b6a" });
+  for (let i = 0; i < 28; i++) { const v = -9 - Math.abs(Math.sin(i * 12.9898) * 43758.5453 % 1) * 6.5; el("circle", { cx: x(v), cy: g + 26 + ((i % 3) - 1) * 7, r: 2.6, fill: MUT, "fill-opacity": .75 }, s); }
+  txt(s, x(-12), g + 54, "普通 key 落进次正规区，甚至被舍成 0", { anchor: "middle", size: 10.5, fill: MUT });
+  const l = 236;
+  txt(s, L, l, "块内局部最大值（Wavefill）", { size: 12, fill: GOLD2 });
+  for (let t = 0; t < 4; t++) {
+    const bx = x(-0.0) + 120 + t * 96;
+    for (let i = 0; i < 7; i++) {
+      const v = -Math.abs(Math.sin((t * 7 + i) * 78.233) * 9631.17 % 1) * 4.6;
+      el("circle", { cx: x(v) + 0, cy: l + 26 + t * 0 + ((i % 3) - 1) * 6, r: 2.6, fill: GOLD2, "fill-opacity": .8 }, s);
+    }
+  }
+  el("circle", { cx: x(0), cy: l + 26, r: 5, fill: GOLD2 }, s);
+  txt(s, x(-6.2), l + 30, "每块最大项恰为 2⁻⁶，其余留在正规区", { size: 10.5, fill: GOLD2 });
+})();
+
+/* ---------- results ledger ---------- */
+(function ledger() {
+  const rows = [
+    ["prefill 注意力内核 · BF16 KV", "64k 上下文 · 1024 token 分块", "11.01 → 7.85 ms", 1.40],
+    ["prefill 注意力内核 · INT8 / FP8 KV", "64k 上下文 · 1024 token 分块", "10.89 → 8.42 / 9.89 → 7.34 ms", 1.35, "1.29 / 1.35"],
+    ["prefill 注意力内核 · 128k / 192k", "BF16 KV", "22.08 → 15.68 ms", 1.41],
+    ["agent 增量注意力", "64k 历史 · 追加 128 token", "3.63 → 1.06 ms", 3.42],
+    ["agent 增量注意力", "64k 历史 · 追加 512 token", "7.29 → 4.00 ms", 1.82],
+    ["整机冷启动 prefill · 128k", "ninfer_bench · 交替 A/B", "33.8 → 28.6 s", 1.18],
+    ["整机冷启动 prefill · 64k", "ninfer_bench · 交替 A/B", "11.29 → 10.11 s", 1.12],
+    ["整机 agent 单轮 · 到首 token", "64k 历史 · 追加 128 token", "102.0 → 65.3 ms", 1.56],
+    ["整机 agent 单轮 · 到首 token", "64k 历史 · 追加 512 token", "196.6 → 150.8 ms", 1.30],
+    ["decode · 单请求无投机", "NVFP4 下投影 GEMV 收卷", "76.92 → 77.88 tok/s", 1.0125, "+1.25%"]
+  ];
+  const tb = document.querySelector("#ledger tbody");
+  rows.forEach(([w, e, v, x, lab]) => {
+    const tr = document.createElement("tr");
+    const pct = Math.min(100, (Math.log(x) / Math.log(3.6)) * 100);
+    tr.innerHTML = `<td class="what">${w}<em>${e}</em></td><td class="v">${v}</td><td class="barc"><div class="bar"><i style="width:${pct}%"></i></div></td><td class="x">${lab || x.toFixed(2)}${lab ? "" : "<small>×</small>"}</td>`;
+    tb.appendChild(tr);
+  });
+})();
+
+/* ---------- clock under power cap ---------- */
+(function clock() {
+  const s = document.getElementById("clock");
+  const L = 56, R = 540, T = 30, B = 230;
+  const y = v => B - (v - 2400) / (2900 - 2400) * (B - T);
+  [2500, 2600, 2700, 2800, 2900].forEach(v => { el("line", { x1: L, x2: R, y1: y(v), y2: y(v), stroke: LINE }, s); txt(s, L - 8, y(v) + 4, v, { anchor: "end", size: 10.5, mono: 1 }); });
+  txt(s, L, 16, "SM 频率（MHz）· 64k prefill · 600 W 功耗墙", { size: 11 });
+  const bars = [["空载 boost", 2870, ST3, "≈2870"], ["NInfer 中位数", 2745, ST2, "2745"], ["Wavefill 中位数", 2595, GOLD, "2595"]];
+  const bw = 90;
+  bars.forEach(([n, v, c, l], i) => {
+    const xx = L + 40 + i * 150;
+    el("rect", { x: xx, y: y(v), width: bw, height: B - y(v), fill: c }, s);
+    txt(s, xx + bw / 2, y(v) - 10, l, { anchor: "middle", size: 13, fill: i === 2 ? GOLD2 : IV, mono: 1 });
+    txt(s, xx + bw / 2, B + 20, n, { anchor: "middle", size: 11, fill: i === 2 ? GOLD2 : MUT });
+  });
+  txt(s, L, B + 54, "−5.5% 的频率，换来 1.40× 的单位频率吞吐 → 引擎内 1.32×", { size: 11.5, fill: IV });
+})();
+
+/* ---------- versus ---------- */
+const ENG = [
+  { k: "wavefill", n: "Wavefill", c: GOLD },
+  { k: "ninfer", n: "NInfer 9e163eee", c: ST },
+  { k: "vllm", n: "vLLM 0.27.1", c: ST2 },
+  { k: "sglang", n: "SGLang 0.5.17", c: ST3 }
+];
+const VD = window.WAVEFILL_VERSUS;
+(function versus() {
+  const s = document.getElementById("versussvg");
+  document.getElementById("vlegend").innerHTML = ENG.map(e => `<span><i style="background:${e.c}"></i>${e.n}</span>`).join("");
+  let cur;
+  function draw(g) {
+    cur = g; clear(s);
+    const narrow = s.parentNode.clientWidth < 640, VW = narrow ? 380 : 1060, VH = narrow ? 440 : 360;
+    s.setAttribute("viewBox", `0 0 ${VW} ${VH}`);
+    const L = narrow ? 84 : 150, R = VW - (narrow ? 66 : 60), T0 = 30;
+    const rows = g.rows, nE = ENG.length, rowH = (VH - 70) / Math.max(rows.length, 2);
+    const max = g.max;
+    txt(s, narrow ? 8 : L, 16, g.axis, { size: narrow ? 10.5 : 11, fill: MUT });
+    for (let i = 0; i <= 4; i++) {
+      const v = max * i / 4, xx = L + (R - L) * i / 4;
+      el("line", { x1: xx, x2: xx, y1: T0 - 4, y2: T0 + rows.length * rowH, stroke: LINE }, s);
+      txt(s, xx, T0 + rows.length * rowH + 18, g.fmt(v), { anchor: "middle", size: 10.5, mono: 1 });
+    }
+    rows.forEach((r, ri) => {
+      const y0 = T0 + ri * rowH, bh = Math.min(16, (rowH - 18) / nE);
+      txt(s, L - 12, y0 + rowH / 2 + 4, r.label, { anchor: "end", size: narrow ? 13 : 12.5, fill: IV });
+      ENG.forEach((e, ei) => {
+        const v = r.v[ei], y = y0 + 6 + ei * (bh + 3);
+        if (v == null) {
+          txt(s, L + 6, y + bh - 3, r.na || "n/a", { size: 10.5, fill: FAINT, mono: 1 });
+          return;
+        }
+        const w = Math.max(1, (R - L) * v / max);
+        const bar = el("rect", { x: L, y, width: reduce ? w : 0, height: bh, fill: e.c }, s);
+        if (!reduce) requestAnimationFrame(() => { bar.style.transition = "width .9s cubic-bezier(.2,.7,.2,1)"; bar.setAttribute("width", w); });
+        txt(s, L + w + 6, y + bh - 3, g.fmt(v, true), { size: narrow ? 12 : 11, fill: ei === 0 ? GOLD2 : MUT, mono: 1 });
+      });
+    });
+  }
+  seg("vseg", VD.groups.map(g => ({ label: g.label, g })), it => draw(it.g), 0);
+  let rt; addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => draw(cur), 150); });
+
+  document.getElementById("vcards").innerHTML = VD.cards.map(c => `<div class="card"><h4>${c.k}</h4><h3>${c.t}</h3><p>${c.d}</p></div>`).join("");
+  const tbl = document.getElementById("vtable");
+  tbl.innerHTML = `<thead><tr><th>测试（中位数）</th>${VD.table.head.map(h => `<th>${h}</th>`).join("")}</tr></thead><tbody>${
+    VD.table.rows.map(r => `<tr><td>${r[0]}</td>${r.slice(1).map((v, i) => `<td class="${i === 0 ? "w" : ""}${v === "—" ? " na" : ""}">${v}</td>`).join("")}</tr>`).join("")}</tbody>`;
+  document.getElementById("vnote").innerHTML = VD.note;
+})();
+})();
+</script>
+</body>
+</html>
