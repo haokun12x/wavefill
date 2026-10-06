@@ -780,3 +780,5 @@ tools/wavefill/build-agent-turns.sh build && build/agent_turns --weights qwen3_8
 | `sanitizers.txt`、`sass_diff_ninfer_bench.txt` | 正确性 |
 
 工具源码在 [`tools/wavefill/`](../../tools/wavefill/)。设计细节见 [long-context-attention.md](long-context-attention.md) 和 [nvfp4-down-gemv.md](nvfp4-down-gemv.md)。
+
+与 vLLM、SGLang 在同一块卡上的同条件对比见 [engine-comparison.zh-CN.md](engine-comparison.zh-CN.md)。项目主页（含介绍影片）：<https://haokun12x.github.io/wavefill/>。

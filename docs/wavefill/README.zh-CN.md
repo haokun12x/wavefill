@@ -27,4 +27,4 @@ Wavefill 是 [NInfer](https://github.com/Neroued/ninfer) 的一个分支，专�
 - compute-sanitizer 四个工具共 48 次运行，0 错误。
 - 对整个引擎做 SASS 对比，确认只有目标内核发生了变化。
 
-完整的实验报告与理论分析（硬件上限、性能模型、数值证明、agent 场景实测、功耗墙）见 [technical-report.zh-CN.md](technical-report.zh-CN.md)；设计细节见 [long-context-attention.md](long-context-attention.md) 和 [nvfp4-down-gemv.md](nvfp4-down-gemv.md)。开发过程借助了 AI 编程助手（Claude Code）。许可证沿用 NInfer 的 Apache 2.0。
+完整的实验报告与理论分析（硬件上限、性能模型、数值证明、agent 场景实测、功耗墙）见 [technical-report.zh-CN.md](technical-report.zh-CN.md)；与 vLLM、SGLang 的同条件对比见 [engine-comparison.zh-CN.md](engine-comparison.zh-CN.md)；项目主页（含介绍影片）：<https://haokun12x.github.io/wavefill/>。设计细节见 [long-context-attention.md](long-context-attention.md) 和 [nvfp4-down-gemv.md](nvfp4-down-gemv.md)。开发过程借助了 AI 编程助手（Claude Code）。许可证沿用 NInfer 的 Apache 2.0。

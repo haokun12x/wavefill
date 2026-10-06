@@ -1,0 +1,26 @@
+{"test": "cold", "n": 32768, "rep": 0, "seconds": 4.370195155963302, "prompt_tokens": 32812, "cached": 0}
+{"test": "cold", "n": 32768, "rep": 1, "seconds": 4.3841362609528005, "prompt_tokens": 32812, "cached": 0}
+{"test": "cold", "n": 65536, "rep": 0, "seconds": 11.41494838311337, "prompt_tokens": 65580, "cached": 0}
+{"test": "cold", "n": 65536, "rep": 1, "seconds": 11.530775927007198, "prompt_tokens": 65580, "cached": 0}
+{"test": "cold", "n": 131072, "rep": 0, "seconds": 34.214387053856626, "prompt_tokens": 131116, "cached": 0}
+{"test": "cold", "n": 131072, "rep": 1, "seconds": 34.29424417996779, "prompt_tokens": 131116, "cached": 0}
+{"test": "turn", "history": 65536, "delta": 128, "turn": 0, "seconds": 0.19297868106514215, "prompt_tokens": 65867, "cached": 65724}
+{"test": "turn", "history": 65536, "delta": 128, "turn": 1, "seconds": 0.18160144379362464, "prompt_tokens": 66010, "cached": 65867}
+{"test": "turn", "history": 65536, "delta": 128, "turn": 2, "seconds": 0.19199330895207822, "prompt_tokens": 66153, "cached": 66010}
+{"test": "turn", "history": 65536, "delta": 512, "turn": 0, "seconds": 0.26961252093315125, "prompt_tokens": 66636, "cached": 66109}
+{"test": "turn", "history": 65536, "delta": 512, "turn": 1, "seconds": 0.27152967103756964, "prompt_tokens": 67162, "cached": 66636}
+{"test": "turn", "history": 65536, "delta": 512, "turn": 2, "seconds": 0.27280690986663103, "prompt_tokens": 67688, "cached": 67162}
+{"test": "turn", "history": 65536, "delta": 4096, "turn": 0, "seconds": 1.22986343014054, "prompt_tokens": 73805, "cached": 69694}
+{"test": "turn", "history": 65536, "delta": 4096, "turn": 1, "seconds": 1.2713677980937064, "prompt_tokens": 77916, "cached": 73805}
+{"test": "turn", "history": 65536, "delta": 4096, "turn": 2, "seconds": 1.3287514909170568, "prompt_tokens": 82027, "cached": 77916}
+{"test": "decode", "rep": 1, "ttft": 0.03357432992197573, "tokens": 512, "decode_tps": 76.8607775881998}
+{"test": "decode", "rep": 2, "ttft": 0.034059938974678516, "tokens": 512, "decode_tps": 76.870176286082}
+summary ninfer
+  cold 32768: median 4.377 s
+  cold 65536: median 11.473 s
+  cold 131072: median 34.254 s
+  turn h=65536 d=128: median 192.0 ms, cached [65724, 65867, 66010] of [65867, 66010, 66153]
+  turn h=65536 d=512: median 271.5 ms, cached [66109, 66636, 67162] of [66636, 67162, 67688]
+  turn h=65536 d=4096: median 1271.4 ms, cached [69694, 73805, 77916] of [73805, 77916, 82027]
+  decode 76.9 tok/s (512 tokens)
+  decode 76.9 tok/s (512 tokens)

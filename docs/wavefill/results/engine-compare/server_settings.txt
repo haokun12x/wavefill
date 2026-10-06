@@ -1,0 +1,42 @@
+# Server-side settings as logged (excerpts; local paths removed)
+
+## wavefill / ninfer (ninfer-serve)
+2026-10-03 14:38:50.039  INFO  pinning host KV | 8.00 GiB
+2026-10-03 14:38:52.178  INFO  host KV pinned | 8.00 GiB | 2.1s
+2026-10-03 14:38:52.695  INFO  capacity | KV 142,336 tokens, bf16, auto | pages 2,224/2,224 | runtime 9.15 GiB | free 2.40 GiB
+2026-10-03 14:38:52.695  INFO  context cache | 1 active + 1 cached device states | host 8 states, 8.00 GiB KV | private 2 | shared 4 | anchors 2
+
+## vllm (BF16 KV, main run)
+(EngineCore pid=1862829) INFO 10-04 07:02:50 [flash_attn.py:789] Using FlashAttention version 2
+(EngineCore pid=1862829) INFO 10-04 07:02:50 [__init__.py:1077] Using FlashInferCutlassNvFp4LinearKernel for NVFP4 GEMM
+(EngineCore pid=1862829) INFO 10-04 07:02:50 [cuda.py:482] Using FLASH_ATTN attention backend out of potential backends: ['FLASH_ATTN', 'FLASHINFER', 'TRITON_ATTN', 'FLEX_ATTENTION'].
+(EngineCore pid=1862829) INFO 10-04 07:02:56 [interface.py:911] Setting attention block size to 784 tokens to ensure that attention page size is >= mamba page size.
+(EngineCore pid=1862829) INFO 10-04 07:02:56 [interface.py:935] Padding mamba page size by 0.13% to ensure that mamba page size and attention page size are exactly equal.
+(EngineCore pid=1862829) INFO 10-04 07:04:58 [kv_cache_utils.py:2235] GPU KV cache size: 142,336 tokens
+(EngineCore pid=1862829) INFO 10-04 07:04:58 [kv_cache_utils.py:2236] Maximum concurrency for 142,336 tokens per request: 1.00x
+(APIServer pid=1862599) INFO 10-04 07:08:09 [loggers.py:310] Engine 000: Avg prompt throughput: 6747.4 tokens/s, Avg generation throughput: 0.5 tokens/s, Running: 1 reqs, Waiting: 0 reqs, GPU KV cache usage: 32.1%, Prefix cache hit rate: 30.3%
+(APIServer pid=1862599) INFO 10-04 07:08:19 [loggers.py:310] Engine 000: Avg prompt throughput: 6740.2 tokens/s, Avg generation throughput: 0.3 tokens/s, Running: 0 reqs, Waiting: 0 reqs, GPU KV cache usage: 0.0%, Prefix cache hit rate: 39.4%
+(APIServer pid=1862599) INFO 10-04 07:08:29 [loggers.py:310] Engine 000: Avg prompt throughput: 235.4 tokens/s, Avg generation throughput: 0.2 tokens/s, Running: 0 reqs, Waiting: 1 reqs, GPU KV cache usage: 0.0%, Prefix cache hit rate: 43.9%
+(APIServer pid=1862599) INFO 10-04 07:08:39 [loggers.py:310] Engine 000: Avg prompt throughput: 8369.0 tokens/s, Avg generation throughput: 16.3 tokens/s, Running: 1 reqs, Waiting: 0 reqs, GPU KV cache usage: 2.1%, Prefix cache hit rate: 54.0%
+(APIServer pid=1862599) INFO 10-04 07:08:49 [loggers.py:310] Engine 000: Avg prompt throughput: 3.8 tokens/s, Avg generation throughput: 56.0 tokens/s, Running: 1 reqs, Waiting: 0 reqs, GPU KV cache usage: 2.1%, Prefix cache hit rate: 54.0%
+(APIServer pid=1862599) INFO 10-04 07:08:59 [loggers.py:310] Engine 000: Avg prompt throughput: 3.8 tokens/s, Avg generation throughput: 56.1 tokens/s, Running: 1 reqs, Waiting: 0 reqs, GPU KV cache usage: 2.1%, Prefix cache hit rate: 54.0%
+
+## vllm-fp8kv (--kv-cache-dtype auto -> FP8 from the checkpoint's kv_cache_scheme)
+(EngineCore pid=1644041) INFO 10-03 15:07:13 [cuda.py:482] Using FLASHINFER attention backend out of potential backends: ['FLASHINFER', 'TRITON_ATTN'].
+(EngineCore pid=1644041) INFO 10-03 15:07:19 [interface.py:911] Setting attention block size to 1568 tokens to ensure that attention page size is >= mamba page size.
+(EngineCore pid=1644041) INFO 10-03 15:07:22 [kv_cache_utils.py:2235] GPU KV cache size: 152,607 tokens
+(EngineCore pid=1644041) INFO 10-03 15:07:22 [flashinfer.py:824] FlashInfer resolved query dtypes: prefill=torch.bfloat16, decode=torch.bfloat16, decode_backend=flashinfer-native, kv_cache_dtype=torch.float8_e4m3fn, arch=sm120
+
+## sglang
+[2026-10-03 15:11:34] KV Cache is allocated. dtype: torch.bfloat16, #tokens: 85007, K size: 2.59 GB, V size: 2.59 GB
+[2026-10-03 15:11:36] max_total_num_tokens=85007, chunked_prefill_size=2048, max_prefill_tokens=16384, max_running_requests=1, context_len=142336, available_gpu_mem=1.23 GB
+[2026-10-03 15:12:23] Input length (131116 tokens) exceeds the maximum allowed length (85001 tokens). Use a shorter input or enable --allow-auto-truncate., self.rid='2cbc9240887c4b018ab3885d19744158'
+attention_backend='flashinfer'
+attention_backend=None
+chunked_prefill_size=2048
+fp4_gemm_runner_backend='flashinfer_cudnn'
+kv_cache_dtype='bf16'
+linear_attn_backend='triton'
+mamba_radix_cache_strategy='extra_buffer'
+mamba_track_interval=256
+page_size=1

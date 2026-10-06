@@ -1,0 +1,142 @@
+{
+ "engine": "sglang",
+ "cold": [
+  {
+   "test": "cold",
+   "n": 32768,
+   "rep": 0,
+   "seconds": 4.163743773009628,
+   "prompt_tokens": 32812,
+   "cached": null
+  },
+  {
+   "test": "cold",
+   "n": 32768,
+   "rep": 1,
+   "seconds": 4.164981485111639,
+   "prompt_tokens": 32812,
+   "cached": null
+  },
+  {
+   "test": "cold",
+   "n": 65536,
+   "rep": 0,
+   "seconds": 10.533120876178145,
+   "prompt_tokens": 65580,
+   "cached": null
+  },
+  {
+   "test": "cold",
+   "n": 65536,
+   "rep": 1,
+   "seconds": 10.577932537999004,
+   "prompt_tokens": 65580,
+   "cached": null
+  },
+  {
+   "test": "cold",
+   "n": 131072,
+   "rep": 0,
+   "error": "HTTP 400: b'{\"object\":\"error\",\"message\":\"Input length (131116 tokens) exceeds the maximum allowed length (85001 tokens). Use a shorter input or enable --allow-auto-truncate.\",\"type\":\"BadRequestError\",\"param\":null,\"code\":400}'"
+  }
+ ],
+ "turns": [
+  {
+   "test": "turn",
+   "history": 65536,
+   "delta": 128,
+   "turn": 0,
+   "seconds": 0.2587143259588629,
+   "prompt_tokens": 65867,
+   "cached": 65664
+  },
+  {
+   "test": "turn",
+   "history": 65536,
+   "delta": 128,
+   "turn": 1,
+   "seconds": 0.342911517014727,
+   "prompt_tokens": 66010,
+   "cached": 65856
+  },
+  {
+   "test": "turn",
+   "history": 65536,
+   "delta": 128,
+   "turn": 2,
+   "seconds": 0.3376775060314685,
+   "prompt_tokens": 66153,
+   "cached": 65984
+  },
+  {
+   "test": "turn",
+   "history": 65536,
+   "delta": 512,
+   "turn": 0,
+   "seconds": 0.4494413170032203,
+   "prompt_tokens": 66635,
+   "cached": 66048
+  },
+  {
+   "test": "turn",
+   "history": 65536,
+   "delta": 512,
+   "turn": 1,
+   "seconds": 0.4531403509899974,
+   "prompt_tokens": 67162,
+   "cached": 66624
+  },
+  {
+   "test": "turn",
+   "history": 65536,
+   "delta": 512,
+   "turn": 2,
+   "seconds": 0.4586433020886034,
+   "prompt_tokens": 67688,
+   "cached": 67136
+  },
+  {
+   "test": "turn",
+   "history": 65536,
+   "delta": 4096,
+   "turn": 0,
+   "seconds": 1.3379763490520418,
+   "prompt_tokens": 73803,
+   "cached": 69632
+  },
+  {
+   "test": "turn",
+   "history": 65536,
+   "delta": 4096,
+   "turn": 1,
+   "seconds": 1.2961982500273734,
+   "prompt_tokens": 77914,
+   "cached": 73792
+  },
+  {
+   "test": "turn",
+   "history": 65536,
+   "delta": 4096,
+   "turn": 2,
+   "seconds": 1.4328026208095253,
+   "prompt_tokens": 82024,
+   "cached": 77888
+  }
+ ],
+ "decode": [
+  {
+   "test": "decode",
+   "rep": 1,
+   "ttft": 0.0940040301065892,
+   "tokens": 512,
+   "decode_tps": 41.287136105640315
+  },
+  {
+   "test": "decode",
+   "rep": 2,
+   "ttft": 0.09302011597901583,
+   "tokens": 512,
+   "decode_tps": 41.29333021337718
+  }
+ ]
+}

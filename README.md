@@ -2,6 +2,8 @@
 
 **Long-context prefill acceleration for [NInfer](https://github.com/Neroued/ninfer) on the RTX 5090.**
 
+Project page with the film: **<https://haokun12x.github.io/wavefill/>**
+
 Wavefill is a fork of NInfer, a from-scratch C++/CUDA inference engine for Qwen3.5-family models
 on one GeForce RTX 5090. It speeds up the causal prompt attention that dominates long-prompt
 prefill, plus one decode GEMV. All of NInfer's design, features and most of its code are the
@@ -30,6 +32,7 @@ upstream authors' work; Wavefill's changes are the three commits on top of upstr
 Details: [long-context attention](docs/wavefill/long-context-attention.md) ·
 [NVFP4 GEMV](docs/wavefill/nvfp4-down-gemv.md) · [中文概要](docs/wavefill/README.zh-CN.md) ·
 [技术报告（中文）](docs/wavefill/technical-report.zh-CN.md) ·
+[vs vLLM / SGLang（中文）](docs/wavefill/engine-comparison.zh-CN.md) ·
 [tools](tools/wavefill/README.md) · [raw results](docs/wavefill/results/).
 Built with an AI coding assistant (Claude Code); measurements and design decisions are documented
 in the links above.

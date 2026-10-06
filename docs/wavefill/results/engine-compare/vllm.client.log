@@ -1,0 +1,26 @@
+{"test": "cold", "n": 32768, "rep": 0, "seconds": 4.289995644008741, "prompt_tokens": 32812, "cached": null}
+{"test": "cold", "n": 32768, "rep": 1, "seconds": 4.2921110899187624, "prompt_tokens": 32812, "cached": null}
+{"test": "cold", "n": 65536, "rep": 0, "seconds": 11.001685478026047, "prompt_tokens": 65580, "cached": null}
+{"test": "cold", "n": 65536, "rep": 1, "seconds": 11.026764979818836, "prompt_tokens": 65580, "cached": null}
+{"test": "cold", "n": 131072, "rep": 0, "seconds": 31.57830023788847, "prompt_tokens": 131116, "cached": null}
+{"test": "cold", "n": 131072, "rep": 1, "seconds": 31.74079438392073, "prompt_tokens": 131116, "cached": null}
+{"test": "turn", "history": 65536, "delta": 128, "turn": 0, "seconds": 0.39187681511975825, "prompt_tokens": 65867, "cached": null}
+{"test": "turn", "history": 65536, "delta": 128, "turn": 1, "seconds": 0.2114255060441792, "prompt_tokens": 66010, "cached": null}
+{"test": "turn", "history": 65536, "delta": 128, "turn": 2, "seconds": 0.22113959188573062, "prompt_tokens": 66153, "cached": null}
+{"test": "turn", "history": 65536, "delta": 512, "turn": 0, "seconds": 0.3158987869974226, "prompt_tokens": 66636, "cached": null}
+{"test": "turn", "history": 65536, "delta": 512, "turn": 1, "seconds": 0.4973482999484986, "prompt_tokens": 67162, "cached": null}
+{"test": "turn", "history": 65536, "delta": 512, "turn": 2, "seconds": 0.4180036159232259, "prompt_tokens": 67688, "cached": null}
+{"test": "turn", "history": 65536, "delta": 4096, "turn": 0, "seconds": 1.402460192097351, "prompt_tokens": 73805, "cached": null}
+{"test": "turn", "history": 65536, "delta": 4096, "turn": 1, "seconds": 1.2775340878870338, "prompt_tokens": 77916, "cached": null}
+{"test": "turn", "history": 65536, "delta": 4096, "turn": 2, "seconds": 1.401107724988833, "prompt_tokens": 82027, "cached": null}
+{"test": "decode", "rep": 1, "ttft": 0.08978051692247391, "tokens": 512, "decode_tps": 56.4625856813984}
+{"test": "decode", "rep": 2, "ttft": 0.08921737200580537, "tokens": 512, "decode_tps": 56.488499531171705}
+summary vllm
+  cold 32768: median 4.291 s
+  cold 65536: median 11.014 s
+  cold 131072: median 31.660 s
+  turn h=65536 d=128: median 221.1 ms, cached [None, None, None] of [65867, 66010, 66153]
+  turn h=65536 d=512: median 418.0 ms, cached [None, None, None] of [66636, 67162, 67688]
+  turn h=65536 d=4096: median 1401.1 ms, cached [None, None, None] of [73805, 77916, 82027]
+  decode 56.5 tok/s (512 tokens)
+  decode 56.5 tok/s (512 tokens)

@@ -17,4 +17,5 @@ headers with NInfer's nvcc flags (`build.sh`, needs CUDA 13.x and an sm_120 GPU)
 | `prefill_model.py` | whole-prompt prefill time from per-chunk attention times + 88 ms of other work per 1024-token chunk |
 | `sass-diff.py` | which device functions differ between two binaries, compared as SASS hash multisets |
 | `agent_turns.cpp`, `build-agent-turns.sh <build>` | agent-turn latency on the whole engine: long history kept by prefix reuse, then turns that append d tokens; links against an existing build tree's libraries |
+| `engine-compare/` | same-workload comparison with vLLM / SGLang over HTTP: `run_all.sh` starts each server and runs `bench_engines.py`; `analyze.py` fits the cold-prefill and per-turn models ([report](../../docs/wavefill/engine-comparison.zh-CN.md)) |
 | `long-prefill-ab.sh` | whole-model long-prompt prefill A/B of two `ninfer_bench` binaries (needs ≥ 26 GiB free GPU memory) |

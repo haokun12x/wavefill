@@ -1,0 +1,26 @@
+{"test": "cold", "n": 32768, "rep": 0, "seconds": 3.9579860349185765, "prompt_tokens": 32812, "cached": 0}
+{"test": "cold", "n": 32768, "rep": 1, "seconds": 3.9772592291701585, "prompt_tokens": 32812, "cached": 0}
+{"test": "cold", "n": 65536, "rep": 0, "seconds": 9.936718247830868, "prompt_tokens": 65580, "cached": 0}
+{"test": "cold", "n": 65536, "rep": 1, "seconds": 10.05753665114753, "prompt_tokens": 65580, "cached": 0}
+{"test": "cold", "n": 131072, "rep": 0, "seconds": 28.402152084978297, "prompt_tokens": 131116, "cached": 0}
+{"test": "cold", "n": 131072, "rep": 1, "seconds": 28.635007112054154, "prompt_tokens": 131116, "cached": 0}
+{"test": "turn", "history": 65536, "delta": 128, "turn": 0, "seconds": 0.1611765509005636, "prompt_tokens": 65867, "cached": 65724}
+{"test": "turn", "history": 65536, "delta": 128, "turn": 1, "seconds": 0.1629539760760963, "prompt_tokens": 66010, "cached": 65867}
+{"test": "turn", "history": 65536, "delta": 128, "turn": 2, "seconds": 0.1620654531288892, "prompt_tokens": 66153, "cached": 66010}
+{"test": "turn", "history": 65536, "delta": 512, "turn": 0, "seconds": 0.22358439001254737, "prompt_tokens": 66636, "cached": 66109}
+{"test": "turn", "history": 65536, "delta": 512, "turn": 1, "seconds": 0.22975700511597097, "prompt_tokens": 67162, "cached": 66636}
+{"test": "turn", "history": 65536, "delta": 512, "turn": 2, "seconds": 0.23181152087636292, "prompt_tokens": 67688, "cached": 67162}
+{"test": "turn", "history": 65536, "delta": 4096, "turn": 0, "seconds": 1.044428579043597, "prompt_tokens": 73805, "cached": 69694}
+{"test": "turn", "history": 65536, "delta": 4096, "turn": 1, "seconds": 1.0706470469012856, "prompt_tokens": 77916, "cached": 73805}
+{"test": "turn", "history": 65536, "delta": 4096, "turn": 2, "seconds": 1.0977119461167604, "prompt_tokens": 82027, "cached": 77916}
+{"test": "decode", "rep": 1, "ttft": 0.033957245061174035, "tokens": 512, "decode_tps": 77.5968871266989}
+{"test": "decode", "rep": 2, "ttft": 0.033685021102428436, "tokens": 512, "decode_tps": 77.59840277449482}
+summary wavefill
+  cold 32768: median 3.968 s
+  cold 65536: median 9.997 s
+  cold 131072: median 28.519 s
+  turn h=65536 d=128: median 162.1 ms, cached [65724, 65867, 66010] of [65867, 66010, 66153]
+  turn h=65536 d=512: median 229.8 ms, cached [66109, 66636, 67162] of [66636, 67162, 67688]
+  turn h=65536 d=4096: median 1070.6 ms, cached [69694, 73805, 77916] of [73805, 77916, 82027]
+  decode 77.6 tok/s (512 tokens)
+  decode 77.6 tok/s (512 tokens)
